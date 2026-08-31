@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = []
+members = ["crates/marmot-wasm-probe"]
 
 [workspace.package]
 edition = "2024"
