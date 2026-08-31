@@ -45,7 +45,7 @@ The first release proves interoperable one-to-one direct messages. Multi-user gr
 - Browser, CLI, and MCP-compatible agent access.
 - Optional passphrase-encrypted vaults.
 - Native Rust relay with an internally hosted onion service.
-- Browser Tor through Arti WASM and a KPS gateway, using public Snowflake infrastructure where available.
+- Browser Tor through Arti WASM and a KPS gateway; Snowflake compatibility is an optional transport capability when supported by the pinned Arti integration.
 - Node CLI Tor through an Arti-based direct network adapter, without KPS.
 - Static browser application hosted by the relay over its onion service.
 - A loopback debugging mode for development and tests.
@@ -76,7 +76,7 @@ The gate must demonstrate:
 1. A reduced Rust Marmot/MDK engine and its OpenMLS dependencies compile to `wasm32-unknown-unknown` with only the one-to-one operations Deaddrop needs.
 2. The WASM engine can create and validate current Marmot account identity proofs, KeyPackages, Welcome messages, kind-445 group messages, and kind-9 application messages.
 3. Browser persistence can round-trip encrypted MLS state through IndexedDB without losing epoch state.
-4. Arti WASM can establish an onion connection in a supported browser through the KPS path and public Snowflake infrastructure.
+4. Arti WASM can establish an onion connection in a supported browser through a KPS gateway. The artifact separately records whether the pinned transport supports public Snowflake infrastructure; Snowflake is not assumed to replace the required KPS gateway.
 5. The Node adapter can establish an onion connection without KPS.
 6. The Rust server can publish and serve its own onion service through embedded Arti.
 7. A browser or Node client can exchange a minimal conversation with a native client using the same pinned Marmot wire profile.
@@ -96,7 +96,7 @@ Browser app                              Node / npx CLI
                               |
                  Nostr transport abstraction
                     /                     \
-      Arti WASM + KPS/Snowflake      Arti Node adapter
+          Arti WASM + KPS           Arti Node adapter
                     \                     /
                      onion WebSocket relay
                               |
@@ -132,7 +132,7 @@ The onion identity is persistent by default so recipient links remain stable. It
 
 ### 6.2 Browser
 
-The browser loads a self-contained application and runs the client cryptography and Arti components in WASM. Because browser sandboxes cannot open arbitrary TCP or UDP sockets, the Arti transport uses the KPS browser gateway design. Public Snowflake broker/bridge infrastructure may provide censorship-resistant bootstrapping; the gateway remains a distinct service that converts browser-available WebRTC traffic into the network access Arti needs.
+The browser loads a self-contained application and runs the client cryptography and Arti components in WASM. Because browser sandboxes cannot open arbitrary TCP or UDP sockets, the Arti transport uses the KPS browser gateway design. If the pinned Arti integration also exposes Snowflake, Deaddrop may offer it as an optional censorship-resistant transport, but Snowflake is not assumed to provide or replace the KPS gateway.
 
 The web application ships with a default public KPS gateway list and allows users to add or replace gateways. Gateway failure is visible and does not cause clearnet fallback. Deaddrop documents that a gateway can observe client connection metadata and that operating it beside a relay weakens unlinkability.
 
@@ -212,11 +212,11 @@ The relay rejects broad inbox scans, broad kind-445 scans, filters that omit the
 Every published event must have a valid signature, and author binding is enforced by event class:
 
 - public profile and KeyPackage events must be authored by the NIP-42-authenticated account;
-- kind-445 group events must satisfy the current Marmot author and envelope rules and be published by a connection authenticated as that Marmot account;
+- kind-445 group events must satisfy the current Marmot ephemeral-author and envelope rules; MLS authenticates the inner sender, so the outer event key is not required to equal the connection key;
 - NIP-59 gift wraps must use their protocol-required ephemeral outer author, so their outer event key is not required to equal the connection key;
 - all inbox events must have exactly one permitted recipient shape.
 
-The connection key remains the authenticated admission and rate-limit principal even where an envelope protocol requires a different event author. An anonymous sender can use a disposable connection key, so this does not expose a pre-existing identity.
+The connection key remains the authenticated admission and rate-limit principal even where an envelope protocol requires a different event author. An anonymous sender can use a disposable connection key, so this does not expose a pre-existing identity. The relay does not claim that NIP-42 proves authorship of encrypted Marmot payloads.
 
 Schema checks, timestamp windows, event-size limits, per-connection limits, and quotas run before persistence. The relay cannot validate MLS plaintext and does not attempt content moderation inside ciphertext.
 
@@ -361,7 +361,7 @@ The server therefore minimizes logs, defaults to short encrypted-event retention
 
 - Use deterministic mock transports for routine tests.
 - Run gated end-to-end tests through a local Tor test network.
-- Run scheduled browser tests through KPS/Snowflake and a disposable onion service.
+- Run scheduled browser tests through KPS and a disposable onion service; test Snowflake separately only when the pinned integration exposes it.
 - Detect and fail any direct DNS or socket attempt outside the configured Tor transport.
 
 ### 14.4 Client and vault
@@ -377,7 +377,7 @@ The server therefore minimizes logs, defaults to short encrypted-event retention
 The proof of concept is complete when:
 
 1. A recipient creates a passphrase-protected vault and publishes a KeyPackage through an onion-only relay.
-2. A sender opens the shared link in a supported ordinary browser, reaches the relay using embedded Arti through KPS/Snowflake, creates a fresh identity, and sends a message.
+2. A sender opens the shared link in a supported ordinary browser, reaches the relay using embedded Arti through KPS, creates a fresh identity, and sends a message.
 3. The recipient receives and replies after restarting its client.
 4. Browser and `npx` clients can initiate opposite ends of the same flow.
 5. An MCP client in `correspond` mode can read and reply without gaining key-export or identity-creation authority.
