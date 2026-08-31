@@ -1,0 +1,8 @@
+mdk_repo = "https://github.com/marmot-protocol/mdk.git"
+mdk_rev = "876bdf3c408df0658c158da6a6521745cd0abde5"
+openmls_repo = "https://github.com/erskingardner/openmls.git"
+openmls_rev = "59e7d3b27a7e95237879dd5478de1fd90eff7ada"
+tor_js_repo = "https://github.com/ethereum/tor-js.git"
+tor_js_gateway_rev = "dfa2096ec2067b063e873525f7ac6beaba5be966"
+tor_js_npm = "0.4.1"
+hypertor = "0.3.0"

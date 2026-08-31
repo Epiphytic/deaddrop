@@ -1,1 +1,12 @@
 .worktrees/
+.DS_Store
+.superpowers/
+target/
+node_modules/
+playwright-report/
+test-results/
+artifacts/playwright/
+artifacts/feasibility/tor-state/
+artifacts/feasibility/kps-private-keys/
+packages/*/pkg/
+artifacts/feasibility/live-probe-logs/
