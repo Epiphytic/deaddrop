@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use cgka_traits::{
     capabilities::GroupCapabilities,
     group::{Group, ProtocolProfile},
@@ -30,6 +32,21 @@ fn implements_the_complete_mdk_storage_provider_contract() {
     fn assert_storage_provider<T: StorageProvider>() {}
 
     assert_storage_provider::<WasmStorage>();
+}
+
+#[test]
+fn cloned_handle_shares_the_single_worker_store() {
+    let store = WasmStorage::new();
+    let engine_handle = store.clone();
+
+    engine_handle
+        .test_put_raw("shared", b"key", b"value")
+        .unwrap();
+
+    assert_eq!(
+        store.test_get_raw("shared", b"key").unwrap(),
+        Some(b"value".to_vec())
+    );
 }
 
 #[test]

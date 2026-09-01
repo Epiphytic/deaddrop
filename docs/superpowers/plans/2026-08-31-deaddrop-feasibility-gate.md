@@ -605,9 +605,11 @@ Run: `cargo test -p marmot-wasm-probe --test native_flow -- --nocapture`
 
 Expected: PASS with all event-kind, author, identity-proof, and restart assertions.
 
-- [ ] **Step 5: Generate a deterministic native interop fixture**
+- [ ] **Step 5: Generate a checked-in native interop fixture from fixed scenario inputs**
 
-`generate_fixture.rs` runs the same fixed-key native flow and accepts exactly one output path argument. It atomically writes canonical JSON containing the public events, exported Bob state, expected group id, expected plaintext, upstream revisions, and a conspicuous `test_keys_only: true` marker. It must refuse paths outside `artifacts/feasibility/` and must never accept runtime/user keys.
+`generate_fixture.rs` runs the same fixed-key native flow and accepts exactly one output path argument. It atomically writes RFC 8785 canonical JSON containing the public events, exported Bob state, expected group id, expected plaintext, upstream revisions, and a conspicuous `test_keys_only: true` marker. It must refuse paths outside `artifacts/feasibility/` and must never accept runtime/user keys.
+
+OpenMLS and the Nostr wrappers draw fresh system entropy for KeyPackages, group construction, nonces, and ephemeral transport authors. The checked-in fixture is therefore the authoritative cross-runtime artifact; regenerating it intentionally produces different cryptographic bytes even though the scenario keys, timestamps, relay, `h`, and plaintext are fixed. Browser CI consumes the committed artifact and validates its revisions and protocol fields. Regeneration is an explicit fixture update, not a byte-for-byte reproducibility check.
 
 Run:
 

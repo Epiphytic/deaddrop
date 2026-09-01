@@ -42,3 +42,30 @@ fi
 # unsupported cfgs such as tokio_unstable through either Cargo environment channel.
 env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
   cargo build --locked -p marmot-wasm-probe --target wasm32-unknown-unknown
+
+if ! command -v wasm-pack >/dev/null 2>&1; then
+  echo "error: wasm-pack is required for the browser runtime gate" >&2
+  exit 1
+fi
+
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  wasm-pack build crates/marmot-wasm-probe \
+    --target web \
+    --out-dir ../../artifacts/feasibility/marmot-wasm
+
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  wasm-pack test --headless --chrome crates/marmot-wasm-probe
+
+wasm_artifact="artifacts/feasibility/marmot-wasm/marmot_wasm_probe_bg.wasm"
+uncompressed_bytes="$(wc -c < "$wasm_artifact" | tr -d ' ')"
+gzip_bytes="$(gzip -c "$wasm_artifact" | wc -c | tr -d ' ')"
+size_artifact="artifacts/feasibility/marmot-wasm-size.json"
+{
+  echo '{'
+  echo '  "informational": true,'
+  echo "  \"uncompressed_bytes\": $uncompressed_bytes,"
+  echo "  \"gzip_bytes\": $gzip_bytes"
+  echo '}'
+} > "$size_artifact"
+
+echo "marmot wasm probe: $uncompressed_bytes bytes ($gzip_bytes bytes gzip)" >&2

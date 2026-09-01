@@ -7,7 +7,7 @@ mod outbound;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        RwLock,
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -29,8 +29,13 @@ use crate::{
 /// keep the complete engine and this store on one Worker rather than issuing
 /// concurrent native-thread writes through [`Self::mls_storage`]. Production
 /// browser persistence will replace this probe with a Worker-owned OPFS store.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct WasmStorage {
+    inner: Arc<WasmStorageInner>,
+}
+
+#[derive(Debug, Default)]
+struct WasmStorageInner {
     coordinator: ReentrantMutex<()>,
     app_entries: RwLock<BTreeMap<Vec<u8>, Vec<u8>>>,
     openmls: MemoryStorage,
@@ -46,10 +51,12 @@ impl WasmStorage {
     pub fn export(&self) -> Result<Vec<u8>, ProbeError> {
         self.coordinated(|| {
             let app_entries_guard = self
+                .inner
                 .app_entries
                 .read()
                 .map_err(|_| ProbeError::Serialization)?;
             let openmls_entries_guard = self
+                .inner
                 .openmls
                 .values
                 .read()
@@ -91,17 +98,19 @@ impl WasmStorage {
         snapshot.validate()?;
 
         Ok(Self {
-            coordinator: ReentrantMutex::new(()),
-            app_entries: RwLock::new(snapshot.app_entries),
-            openmls: MemoryStorage {
-                values: RwLock::new(
-                    snapshot
-                        .openmls_entries
-                        .into_iter()
-                        .collect::<HashMap<_, _>>(),
-                ),
-            },
-            transaction_active: AtomicBool::new(false),
+            inner: Arc::new(WasmStorageInner {
+                coordinator: ReentrantMutex::new(()),
+                app_entries: RwLock::new(snapshot.app_entries),
+                openmls: MemoryStorage {
+                    values: RwLock::new(
+                        snapshot
+                            .openmls_entries
+                            .into_iter()
+                            .collect::<HashMap<_, _>>(),
+                    ),
+                },
+                transaction_active: AtomicBool::new(false),
+            }),
         })
     }
 
@@ -110,22 +119,25 @@ impl WasmStorage {
         E: From<StorageError>,
         F: FnOnce(&Self) -> Result<T, E>,
     {
-        let _coordinator = self.coordinator.lock();
+        let _coordinator = self.inner.coordinator.lock();
         if self
+            .inner
             .transaction_active
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
             return Err(StorageError::Backend(ProbeError::NestedTransaction.to_string()).into());
         }
-        let _transaction_flag = TransactionFlagGuard(&self.transaction_active);
+        let _transaction_flag = TransactionFlagGuard(&self.inner.transaction_active);
 
         let app_before = self
+            .inner
             .app_entries
             .read()
             .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))?
             .clone();
         let openmls_before = self
+            .inner
             .openmls
             .values
             .read()
@@ -135,11 +147,13 @@ impl WasmStorage {
         let result = operation(self);
         if result.is_err() {
             *self
+                .inner
                 .app_entries
                 .write()
                 .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))? =
                 app_before;
             *self
+                .inner
                 .openmls
                 .values
                 .write()
@@ -150,7 +164,7 @@ impl WasmStorage {
     }
 
     pub(crate) fn coordinated<T>(&self, operation: impl FnOnce() -> T) -> T {
-        let _guard = self.coordinator.lock();
+        let _guard = self.inner.coordinator.lock();
         operation()
     }
 
@@ -203,7 +217,8 @@ impl WasmStorage {
     pub(crate) fn read_app(
         &self,
     ) -> StorageResult<std::sync::RwLockReadGuard<'_, BTreeMap<Vec<u8>, Vec<u8>>>> {
-        self.app_entries
+        self.inner
+            .app_entries
             .read()
             .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))
     }
@@ -211,19 +226,21 @@ impl WasmStorage {
     pub(crate) fn write_app(
         &self,
     ) -> StorageResult<std::sync::RwLockWriteGuard<'_, BTreeMap<Vec<u8>, Vec<u8>>>> {
-        self.app_entries
+        self.inner
+            .app_entries
             .write()
             .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))
     }
 
     pub(crate) fn openmls(&self) -> &MemoryStorage {
-        &self.openmls
+        &self.inner.openmls
     }
 
     #[doc(hidden)]
     pub fn test_put_raw(&self, namespace: &str, key: &[u8], value: &[u8]) -> StorageResult<()> {
         self.coordinated(|| {
-            self.app_entries
+            self.inner
+                .app_entries
                 .write()
                 .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))?
                 .insert(kv::key(namespace, key), value.to_vec());
@@ -235,6 +252,7 @@ impl WasmStorage {
     pub fn test_get_raw(&self, namespace: &str, key: &[u8]) -> StorageResult<Option<Vec<u8>>> {
         self.coordinated(|| {
             Ok(self
+                .inner
                 .app_entries
                 .read()
                 .map_err(|_| StorageError::Backend("application storage lock poisoned".into()))?

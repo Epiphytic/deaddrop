@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use marmot_wasm_probe::probe_build_info;
 
 #[test]

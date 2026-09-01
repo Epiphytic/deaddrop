@@ -1,6 +1,13 @@
 pub mod error;
+mod probe;
 mod snapshot;
 pub mod storage;
+#[cfg(target_arch = "wasm32")]
+mod wasm_api;
+
+pub use probe::MarmotProbe;
+#[cfg(target_arch = "wasm32")]
+pub use wasm_api::WasmMarmotProbe;
 
 use transport_nostr_peeler::{KIND_MARMOT_GROUP_MESSAGE, KIND_NIP59_GIFT_WRAP};
 
