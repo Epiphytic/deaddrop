@@ -1,6 +1,6 @@
 # MDK Browser-WASM Portability Design
 
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved on 2026-08-31
 
 **Date:** 2026-08-31
 
