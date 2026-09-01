@@ -38,4 +38,7 @@ if [[ -n "${CC_wasm32_unknown_unknown:-}" ]]; then
   echo "marmot wasm probe: using WebAssembly C compiler $CC_wasm32_unknown_unknown" >&2
 fi
 
-cargo build --locked -p marmot-wasm-probe --target wasm32-unknown-unknown
+# Keep the portability probe independent of inherited flags that can re-enable
+# unsupported cfgs such as tokio_unstable through either Cargo environment channel.
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+  cargo build --locked -p marmot-wasm-probe --target wasm32-unknown-unknown
