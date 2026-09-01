@@ -1,0 +1,22 @@
+{
+  "name": "@epiphytic/deaddrop-transport-probe",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "vitest run",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "@kpstreams/core": "0.2.1",
+    "tor-js": "https://github.com/Epiphytic/tor-js/releases/download/deaddrop-onion-v0.4.1.1/tor-js-0.4.1.tgz"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "25.3.0",
+    "ajv": "8.20.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

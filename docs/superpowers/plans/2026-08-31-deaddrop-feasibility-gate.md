@@ -744,12 +744,14 @@ git commit -m "spike: host an http service with embedded arti"
 - Create: `packages/transport-probe/test/node-onion.test.ts`
 - Create: `scripts/run-live-node-probe.mjs`
 - Modify: `package-lock.json`
+- Modify: `upstream-pins.toml`
+- Modify: `scripts/validate-pins.mjs`
 
 **Interfaces:**
 - Consumes: `onion-probe` startup JSON and `tor-js@0.4.1` with no gateway option.
 - Produces: `fetchOnionFromNode(onionUrl: string): Promise<ProbeResult>`.
 
-- [ ] **Step 1: Write the failing live Node test**
+- [x] **Step 1: Write the failing live Node test**
 
 ```ts
 import { expect, test } from "vitest";
@@ -767,13 +769,13 @@ test.runIf(process.env.DEADDROP_LIVE_TOR === "1")(
 );
 ```
 
-- [ ] **Step 2: Run it and verify the implementation failure**
+- [x] **Step 2: Run it and verify the implementation failure**
 
 Run with a temporary fake URL: `DEADDROP_LIVE_TOR=1 DEADDROP_ONION_URL=http://example.onion npm test -w packages/transport-probe -- node-onion`
 
 Expected: FAIL because `fetchOnionFromNode` is absent.
 
-- [ ] **Step 3: Implement direct Node transport**
+- [x] **Step 3: Implement direct Node transport**
 
 Create `packages/transport-probe/package.json` with exact dependency versions:
 
@@ -787,7 +789,10 @@ Create `packages/transport-probe/package.json` with exact dependency versions:
     "test": "vitest run",
     "test:browser": "playwright test"
   },
-  "dependencies": { "tor-js": "0.4.1" },
+  "dependencies": {
+    "@kpstreams/core": "0.2.1",
+    "tor-js": "https://github.com/Epiphytic/tor-js/releases/download/deaddrop-onion-v0.4.1.1/tor-js-0.4.1.tgz"
+  },
   "devDependencies": {
     "@playwright/test": "1.62.1",
     "ajv": "8.20.0",
@@ -814,23 +819,28 @@ export interface ProbeResult {
 ```
 
 ```ts
-import { TorClient, storage } from "tor-js/wasm-file";
+import { ArtiSocketProvider, TorClient, storage } from "tor-js/wasm-file";
 
 export async function fetchOnionFromNode(onionUrl: string): Promise<ProbeResult> {
-  if (!/^http:\/\/[a-z2-7]{56}\.onion\/?$/.test(new URL(onionUrl).origin + "/")) {
-    throw new Error("onionUrl must be a v3 onion HTTP origin");
-  }
+  const origin = parseAndVerifyV3OnionOrigin(onionUrl);
   const started = performance.now();
-  const client = new TorClient({ storage: new storage.MemoryStorage() });
+  const client = new TorClient({
+    socketProvider: new ArtiSocketProvider({ strategies: ["direct"] }),
+    storage: new storage.MemoryStorage(),
+  });
   try {
-    const response = await client.fetch(new URL("/health", onionUrl).href, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+    const abort = new AbortController();
+    const body = await withTimeout(async () => {
+      const response = await client.fetch(new URL("/health", origin).href, {
+        signal: abort.signal,
+      });
+      if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+      return response.json();
+    }, 120_000, abort);
     return {
       status: "PASS",
       transport: "tor-js-node-direct",
-      body: await response.json(),
+      body,
       durationMs: Math.round(performance.now() - started),
     };
   } finally {
@@ -839,17 +849,19 @@ export async function fetchOnionFromNode(onionUrl: string): Promise<ProbeResult>
 }
 ```
 
-Do not set `gateway` or provide a clearnet fallback URL.
+Do not set `gateway` or provide a clearnet fallback URL. Validate the decoded v3 hostname version and checksum, not only its base32 shape. The 120-second deadline covers bootstrap, response headers, and body decoding; expiry aborts the request and closes the client.
 
-- [ ] **Step 4: Run the real live probe**
+The public `tor-js@0.4.1` artifact omitted Arti's `onion-service-client` feature and deterministically rejected `.onion` destinations. The feasibility implementation therefore pins the minimal Epiphytic fork commit and a release tarball with npm integrity in `upstream-pins.toml`. The fork changes only that Arti feature, its resulting lock graph, and documented WASM sizes; the patch is intended for upstreaming and retirement after an upstream release contains the fix.
+
+- [x] **Step 4: Run the real live probe**
 
 `scripts/run-live-node-probe.mjs` starts `onion-probe`, parses its JSON startup line, runs the Vitest case, terminates the child cleanly, and writes `artifacts/feasibility/node-onion.json`.
 
 Run: `DEADDROP_LIVE_TOR=1 node scripts/run-live-node-probe.mjs`
 
-Expected: PASS within 180 seconds and a result whose transport is `tor-js-node-direct`.
+Expected: the measured Node Arti bootstrap and HTTP exchange passes within its 120-second deadline and reports `tor-js-node-direct`; Vitest retains a 180-second test ceiling. The harness separately allows up to 300 seconds to build the native probe, 300 seconds for the native service to publish, and 210 seconds as an outer process-tree watchdog. Those setup/watchdog ceilings are not reported as the Node fetch duration.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/transport-probe scripts/run-live-node-probe.mjs package-lock.json artifacts/feasibility/node-onion.json

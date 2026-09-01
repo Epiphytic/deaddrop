@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,8 +36,16 @@ const required = {
   mdk_fork_rev: fullSha,
   openmls_repo: /^https:\/\/github\.com\/erskingardner\/openmls\.git$/,
   openmls_rev: fullSha,
+  tor_js_repo: /^https:\/\/github\.com\/ethereum\/tor-js\.git$/,
   tor_js_gateway_rev: fullSha,
   tor_js_npm: /^0\.4\.1$/,
+  tor_js_fork_repo: /^https:\/\/github\.com\/Epiphytic\/tor-js\.git$/,
+  tor_js_fork_rev: fullSha,
+  tor_js_package_url:
+    /^https:\/\/github\.com\/Epiphytic\/tor-js\/releases\/download\/deaddrop-onion-v0\.4\.1\.1\/tor-js-0\.4\.1\.tgz$/,
+  tor_js_package_sha256: /^[0-9a-f]{64}$/,
+  tor_js_package_integrity: /^sha512-[A-Za-z0-9+/]+={0,2}$/,
+  tor_js_upstream_pr: /^https:\/\/github\.com\/ethereum\/tor-js\/pull\/15$/,
   hypertor: /^0\.3\.0$/,
 };
 const sentinel = /(?:replace|sentinel|todo|tbd|pending|branch|head)/i;
@@ -296,4 +305,59 @@ for (const { name, source } of openMlsPackages) {
     pins.openmls_rev,
     "OpenMLS source",
   );
+}
+
+const packageLock = JSON.parse(await readFile(join(repoRoot, "package-lock.json"), "utf8"));
+const torJsPackage = packageLock.packages?.["node_modules/tor-js"];
+if (!torJsPackage) {
+  throw new Error("package lock contains no tor-js package");
+}
+if (torJsPackage.version !== pins.tor_js_npm) {
+  throw new Error(
+    `tor-js lock version ${torJsPackage.version} does not match ${pins.tor_js_npm}`,
+  );
+}
+if (torJsPackage.resolved !== pins.tor_js_package_url) {
+  throw new Error("tor-js lock does not resolve to the pinned fork release artifact");
+}
+if (torJsPackage.integrity !== pins.tor_js_package_integrity) {
+  throw new Error("tor-js lock integrity does not match the pinned release artifact");
+}
+
+const releaseResponse = await fetch(pins.tor_js_package_url, { redirect: "follow" });
+if (!releaseResponse.ok) {
+  throw new Error(`could not download pinned tor-js artifact: HTTP ${releaseResponse.status}`);
+}
+const releaseBytes = Buffer.from(await releaseResponse.arrayBuffer());
+const releaseSha256 = createHash("sha256").update(releaseBytes).digest("hex");
+if (releaseSha256 !== pins.tor_js_package_sha256) {
+  throw new Error("downloaded tor-js artifact does not match the pinned SHA-256");
+}
+const releaseIntegrity =
+  "sha512-" + createHash("sha512").update(releaseBytes).digest("base64");
+if (releaseIntegrity !== pins.tor_js_package_integrity) {
+  throw new Error("downloaded tor-js artifact does not match the pinned npm integrity");
+}
+
+const releaseDir = await mkdtemp(join(tmpdir(), "deaddrop-tor-js-release-"));
+try {
+  const archive = join(releaseDir, "tor-js.tgz");
+  await writeFile(archive, releaseBytes);
+  run("tar", ["-xzf", archive, "-C", releaseDir]);
+
+  const releasePackage = JSON.parse(
+    await readFile(join(releaseDir, "package", "package.json"), "utf8"),
+  );
+  if (releasePackage.version !== pins.tor_js_npm) {
+    throw new Error("pinned tor-js artifact contains the wrong package version");
+  }
+
+  const releaseWasm = await readFile(
+    join(releaseDir, "package", "dist", "tor_js_bg.wasm"),
+  );
+  if (!releaseWasm.includes(Buffer.from(pins.tor_js_fork_rev, "ascii"))) {
+    throw new Error("pinned tor-js WASM does not embed the pinned fork revision");
+  }
+} finally {
+  await rm(releaseDir, { recursive: true, force: true });
 }
