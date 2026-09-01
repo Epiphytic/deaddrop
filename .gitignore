@@ -9,4 +9,6 @@ artifacts/playwright/
 artifacts/feasibility/tor-state/
 artifacts/feasibility/kps-private-keys/
 packages/*/pkg/
+packages/transport-probe/web/browser.js
 artifacts/feasibility/live-probe-logs/
+artifacts/tools/

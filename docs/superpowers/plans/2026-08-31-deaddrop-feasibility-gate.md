@@ -376,7 +376,7 @@ Write `artifacts/feasibility/mdk-build.json` with this exact shape:
 
 For a failure, set `status` to `FAIL`, preserve sanitized compiler output, commit the artifact, and stop this plan. The design must then choose between maintaining an MDK fork/port or revisiting `marmot-ts`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/marmot-wasm-probe scripts/build-marmot-wasm.sh artifacts/feasibility/mdk-build.json Cargo.lock
@@ -877,6 +877,7 @@ git commit -m "spike: fetch an onion service from node arti"
 - Create: `packages/transport-probe/src/browser.ts`
 - Create: `packages/transport-probe/test/browser-kps.spec.ts`
 - Create: `packages/transport-probe/web/index.html`
+- Create: `patches/tor-js-gateway-loopback.patch`
 - Create: `scripts/install-kps-gateway.sh`
 - Create: `scripts/run-live-browser-probe.mjs`
 - Modify: `packages/transport-probe/package.json`
@@ -886,7 +887,7 @@ git commit -m "spike: fetch an onion service from node arti"
 - Consumes: onion URL plus a KPS address in `ip:port:certhash` format.
 - Produces: `fetchOnionFromBrowser(onionUrl, gateway): Promise<ProbeResult>` and `artifacts/feasibility/browser-kps.json`.
 
-- [ ] **Step 1: Write the failing Playwright test**
+- [x] **Step 1: Write the failing Playwright test**
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -902,23 +903,25 @@ test("browser builds Tor locally and reaches the onion through KPS", async ({ pa
 });
 ```
 
-- [ ] **Step 2: Run it and verify failure**
+- [x] **Step 2: Run it and verify failure**
 
 Run: `npm run test:browser --workspace packages/transport-probe -- browser-kps.spec.ts`
 
 Expected: FAIL because the fixture and browser function do not exist.
 
-- [ ] **Step 3: Pin and install the gateway**
+- [x] **Step 3: Pin and install the gateway**
 
-`scripts/install-kps-gateway.sh` must verify the checked-out commit equals `dfa2096ec2067b063e873525f7ac6beaba5be966`, then run:
+`scripts/install-kps-gateway.sh` verifies the checked-out commit equals `dfa2096ec2067b063e873525f7ac6beaba5be966`, applies the reviewed one-line `patches/tor-js-gateway-loopback.patch`, and installs the patched crate from that verified checkout:
 
 ```bash
-cargo install --git https://github.com/ethereum/tor-js.git --rev dfa2096ec2067b063e873525f7ac6beaba5be966 --locked tor-js-gateway --root artifacts/tools/tor-js-gateway
+git apply --check patches/tor-js-gateway-loopback.patch
+git apply patches/tor-js-gateway-loopback.patch
+cargo install --path crates/tor-js-gateway --locked --root artifacts/tools/tor-js-gateway
 ```
 
-Generate gateway keys only under an ignored temporary directory. Parse the KPS address from startup output; never commit the gateway private key.
+The patch changes the KPS bind from wildcard UDP to `127.0.0.1` so the local proof never exposes an unauthenticated proxy to the LAN. The installer stamp records and verifies the source revision, patch SHA-256, and installed binary SHA-256; the live artifact records the latter two. Generate gateway keys only under an ignored temporary directory. Parse the KPS address from startup output; never commit the gateway private key.
 
-- [ ] **Step 4: Implement the self-contained browser fixture**
+- [x] **Step 4: Implement the self-contained browser fixture**
 
 Use `tor-js/wasm-base64` so the browser never fetches WASM from a CDN:
 
@@ -930,31 +933,37 @@ export async function fetchOnionFromBrowser(
   gateway: string,
 ): Promise<ProbeResult> {
   const started = performance.now();
+  const abort = new AbortController();
   const client = new TorClient({
     gateway,
-    storage: new storage.IndexedDBStorage("deaddrop-feasibility-tor"),
+    storage: storage.addLocking(
+      new storage.IndexedDBStorage("deaddrop-feasibility-tor"),
+      "deaddrop-feasibility-tor",
+    ),
   });
   try {
-    await client.ready();
-    const response = await client.fetch(new URL("/health", onionUrl).href, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok) throw new Error(`onion health returned ${response.status}`);
-    return {
-      status: "PASS",
-      transport: "tor-js-browser-kps",
-      body: await response.json(),
-      durationMs: Math.round(performance.now() - started),
-    };
+    return await withTimeout(async () => {
+      await client.ready();
+      const response = await client.fetch(new URL("/health", onionUrl).href, {
+        signal: abort.signal,
+      });
+      if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+      return {
+        status: "PASS",
+        transport: "tor-js-browser-kps",
+        body: await response.json(),
+        durationMs: Math.round(performance.now() - started),
+      };
+    }, 120_000, abort);
   } finally {
     client.close();
   }
 }
 ```
 
-Bundle locally with esbuild. The page may contact only the configured KPS IP/UDP port as part of WebRTC and the local fixture origin. Add no analytics, fonts, STUN/TURN defaults, CDN imports, or alternate HTTP URL.
+Validate the Tor v3 hostname version and checksum before constructing the client. The 120-second deadline covers initialization, bootstrap, response headers, and body decoding. Bundle locally with esbuild. The page may contact only the configured KPS IP/UDP port as part of WebRTC and the local fixture origin. Add no analytics, fonts, STUN/TURN defaults, CDN imports, or alternate HTTP URL. A deterministic source-policy test holds the pinned browser bundle to `RTCPeerConnection({})` with no ICE server, STUN, or TURN configuration.
 
-- [ ] **Step 5: Run the orchestrated live browser probe**
+- [x] **Step 5: Run the orchestrated live browser probe**
 
 `scripts/run-live-browser-probe.mjs` starts `onion-probe`, the pinned KPS gateway, and a loopback static fixture server; passes the onion and gateway addresses to Playwright; collects browser console/network errors; and terminates every child in `finally`.
 
@@ -962,7 +971,7 @@ Run: `DEADDROP_LIVE_TOR=1 node scripts/run-live-browser-probe.mjs`
 
 Expected: PASS within 180 seconds and `artifacts/feasibility/browser-kps.json` with transport `tor-js-browser-kps`.
 
-- [ ] **Step 6: Record Snowflake capability separately**
+- [x] **Step 6: Record Snowflake capability separately**
 
 Inspect the pinned `tor-js` public API and write:
 
@@ -980,7 +989,7 @@ If the pinned revision actually exposes a tested Snowflake provider, replace `UN
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/transport-probe scripts/install-kps-gateway.sh scripts/run-live-browser-probe.mjs package-lock.json artifacts/feasibility
+git add packages/transport-probe patches/tor-js-gateway-loopback.patch scripts/install-kps-gateway.sh scripts/run-live-browser-probe.mjs package-lock.json artifacts/feasibility
 git commit -m "spike: fetch an onion service from browser arti over kps"
 ```
 

@@ -1,0 +1,13 @@
+diff --git a/crates/tor-js-gateway/src/main.rs b/crates/tor-js-gateway/src/main.rs
+index c81f936..63d153e 100644
+--- a/crates/tor-js-gateway/src/main.rs
++++ b/crates/tor-js-gateway/src/main.rs
+@@ -278,7 +278,7 @@ async fn run(config_path: &PathBuf, once: bool, no_sync: bool, no_mirror: bool) -
+ 
+     // Start the KPS listener: one UDP port serving both QUIC and WebRTC.
+     let listener = kps::listen(
+-        &format!(":{}", cfg.kps_port),
++        &format!("127.0.0.1:{}", cfg.kps_port),
+         kps::ListenOptions {
+             identity: None,
+             key_file: Some(cfg.kps_key_file.clone()),
