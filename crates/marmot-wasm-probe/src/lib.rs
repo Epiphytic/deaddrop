@@ -1,3 +1,7 @@
+pub mod error;
+mod snapshot;
+pub mod storage;
+
 use transport_nostr_peeler::{KIND_MARMOT_GROUP_MESSAGE, KIND_NIP59_GIFT_WRAP};
 
 pub fn probe_build_info() -> String {
