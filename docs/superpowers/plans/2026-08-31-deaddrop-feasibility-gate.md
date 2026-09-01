@@ -650,13 +650,15 @@ git commit -m "spike: prove marmot one-to-one flow in wasm"
 - Create: `crates/onion-probe/src/lib.rs`
 - Create: `crates/onion-probe/src/main.rs`
 - Create: `crates/onion-probe/tests/config.rs`
+- Create: `crates/onion-probe/tests/health.rs`
+- Create: `crates/onion-probe/tests/live_persistence.rs`
 - Modify: `Cargo.toml`
 
 **Interfaces:**
 - Consumes: a writable Tor state directory and virtual port 80.
 - Produces: `OnionProbeConfig::production(state_dir)`, a `/health` JSON route, and one serialized `StartupRecord { onion_url: String, state_dir: PathBuf }` line.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 ```rust
 #[test]
@@ -673,13 +675,13 @@ fn state_directory_is_required() {
 }
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [x] **Step 2: Run and verify failure**
 
 Run: `cargo test -p onion-probe --test config`
 
 Expected: FAIL because the crate does not exist.
 
-- [ ] **Step 3: Implement the minimal onion application**
+- [x] **Step 3: Implement the minimal onion application**
 
 Add `"crates/onion-probe"` to the root Cargo workspace member list. Use:
 
@@ -709,7 +711,7 @@ let running = app.serve_on(onion).await?;
 
 Print the startup record to stdout and structured diagnostics to stderr. Never print onion private keys.
 
-- [ ] **Step 4: Verify unit tests and native build**
+- [x] **Step 4: Verify unit tests and native build**
 
 Run: `cargo test -p onion-probe`
 
@@ -719,11 +721,11 @@ Run: `cargo build --release -p onion-probe`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the live persistence probe**
+- [x] **Step 5: Run the live persistence probe**
 
 With `DEADDROP_LIVE_TOR=1`, start the service twice against the same temporary state directory, capture the first startup JSON line each time, and assert both onion URLs are identical. Inspect listening sockets and assert the process has no TCP listener; Arti's outbound sockets and onion rendezvous streams are allowed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/onion-probe Cargo.lock artifacts/feasibility

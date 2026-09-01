@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/marmot-wasm-probe"]
+members = ["crates/marmot-wasm-probe", "crates/onion-probe"]
 
 [workspace.package]
 edition = "2024"
