@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "check": "browser_kps_onion_fetch",
-  "generated_at": "2026-09-01T22:09:17.689Z",
+  "generated_at": "2026-09-01T22:43:59.614Z",
   "pins": {
     "tor_js_gateway_rev": "dfa2096ec2067b063e873525f7ac6beaba5be966",
     "tor_js_gateway_patch_sha256": "7baf04b31903624c41eb2d5850f55c0c76f3f25a913488648896cd0f82ba0b6d",
@@ -14,5 +14,5 @@
     "service": "deaddrop-feasibility",
     "status": "ok"
   },
-  "durationMs": 8375
+  "durationMs": 10381
 }

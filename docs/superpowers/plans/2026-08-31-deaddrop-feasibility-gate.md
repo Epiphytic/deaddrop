@@ -1009,7 +1009,7 @@ git commit -m "spike: fetch an onion service from browser arti over kps"
 - Consumes: every per-probe JSON artifact.
 - Produces: schema-valid `results.json` and a one-page human recommendation with overall `PASS` or `FAIL`.
 
-- [ ] **Step 1: Write the failing aggregator test**
+- [x] **Step 1: Write the failing aggregator test**
 
 Create `scripts/run-feasibility.test.mjs`:
 
@@ -1029,13 +1029,13 @@ assert.equal(decide({ ...pass, mdk_wasm_compiles: { status: "FAIL" } }), "FAIL")
 assert.equal(decide({ ...pass, snowflake_transport: { status: "UNSUPPORTED" } }), "PASS");
 ```
 
-- [ ] **Step 2: Run it and verify failure**
+- [x] **Step 2: Run it and verify failure**
 
 Run: `node --test scripts/run-feasibility.test.mjs`
 
 Expected: FAIL because `decide` is absent.
 
-- [ ] **Step 3: Implement strict aggregation**
+- [x] **Step 3: Implement strict aggregation**
 
 Export `mandatoryChecks` exactly as listed at the top of this plan. `decide(records)` returns `PASS` only when every mandatory name exists and equals `PASS`; missing, `FAIL`, `ERROR`, or `UNSUPPORTED` mandatory checks return `FAIL`. Validate the final JSON against `schemas/feasibility-result.schema.json` with `ajv` before writing it atomically.
 
@@ -1057,19 +1057,19 @@ The writer supplies the actual UTC generation time, detected OS/architecture/Nod
 
 For `FAIL`, `next_action` names the failed design assumption and requests a design revision. The human Markdown report links the JSON, lists timings and WASM size, explains KPS versus optional Snowflake, and contains no secrets or full capability tags.
 
-- [ ] **Step 4: Add CI without pretending live Tor is deterministic**
+- [x] **Step 4: Add CI without pretending live Tor is deterministic**
 
 `.github/workflows/feasibility.yml` runs formatting, Clippy, Rust unit/native-flow tests, WASM compilation/browser unit tests, npm tests, and pin/schema validation on pushes and pull requests. Live onion/KPS probes run only under `workflow_dispatch` on a dedicated Linux runner with a 15-minute job timeout. CI uploads sanitized logs and JSON artifacts even on failure.
 
 `--offline` runs deterministic checks and writes `artifacts/feasibility/offline-results.json` without claiming an overall gate decision. `--live` runs every deterministic and network check and is the only mode allowed to write the final `results.json`.
 
-- [ ] **Step 5: Run the complete local gate**
+- [x] **Step 5: Run the complete local gate**
 
 Run: `npm run feasibility`
 
 Expected: all deterministic and live checks pass and `artifacts/feasibility/results.json` reports `PASS`. If any mandatory check fails, the command exits nonzero after writing the `FAIL` report. For a deterministic-only run, use `npm run feasibility:offline`; it must not write or preserve a stale final decision.
 
-- [ ] **Step 6: Verify repository quality**
+- [x] **Step 6: Verify repository quality**
 
 Run: `cargo fmt --all -- --check`
 
@@ -1091,7 +1091,7 @@ Run: `git diff --check`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit and push the gate result**
+- [x] **Step 7: Commit and push the gate result**
 
 ```bash
 git add schemas scripts .github/workflows/feasibility.yml artifacts/feasibility docs/feasibility README.md

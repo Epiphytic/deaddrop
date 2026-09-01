@@ -11,4 +11,5 @@ artifacts/feasibility/kps-private-keys/
 packages/*/pkg/
 packages/transport-probe/web/browser.js
 artifacts/feasibility/live-probe-logs/
+artifacts/feasibility/offline-results.json
 artifacts/tools/

@@ -1,0 +1,91 @@
+name: feasibility
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_live:
+        description: Run nondeterministic live Tor probes
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CC_wasm32_unknown_unknown: clang
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Remove checked-in live evidence from this run
+        run: |
+          rm -f artifacts/feasibility/results.json docs/feasibility/2026-08-31-results.md
+          rm -rf artifacts/feasibility/live-probe-logs
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.97.1
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y clang lsof
+      - run: npm ci
+      - run: npm exec playwright install --with-deps chromium
+      - run: cargo install wasm-pack --version 0.15.0 --locked
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: npm test
+      - run: npm run feasibility:offline
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: feasibility-offline-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            artifacts/feasibility/offline-results.json
+            artifacts/feasibility/live-probe-logs/
+
+  live-tor:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CC_wasm32_unknown_unknown: clang
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Remove checked-in evidence from this run
+        run: |
+          rm -f artifacts/feasibility/results.json docs/feasibility/2026-08-31-results.md
+          rm -rf artifacts/feasibility/live-probe-logs
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.97.1
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y clang lsof
+      - run: npm ci
+      - run: npm exec playwright install --with-deps chromium
+      - run: cargo install wasm-pack --version 0.15.0 --locked
+      - run: npm run feasibility
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: feasibility-live-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            artifacts/feasibility/results.json
+            artifacts/feasibility/live-probe-logs/
+            docs/feasibility/2026-08-31-results.md

@@ -34,8 +34,20 @@ process.exit(Number(process.env.FAKE_CARGO_EXIT));
 `,
       { mode: 0o755 },
     );
+    await writeFile(
+      join(fixtureBin, "wasm-pack"),
+      `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from "node:fs";
+if (process.argv[2] === "build") {
+  mkdirSync("artifacts/feasibility/marmot-wasm", { recursive: true });
+  writeFileSync("artifacts/feasibility/marmot-wasm/marmot_wasm_probe_bg.wasm", "wasm");
+}
+`,
+      { mode: 0o755 },
+    );
 
     const result = spawnSync("bash", [wrapperPath], {
+      cwd: fixtureRoot,
       encoding: "utf8",
       env: {
         ...process.env,
