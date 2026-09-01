@@ -119,11 +119,7 @@ git commit -m "feat: add strict relay protocol boundary"
 **Interfaces:**
 
 ```rust
-pub enum AuthorizedQuery {
-    Public(PublicQuery),
-    Inbox { recipient: nostr::PublicKey, constraints: QueryConstraints },
-    Group { h: [u8; 32], constraints: QueryConstraints },
-}
+pub struct AuthorizedQuery(AuthorizedQueryInner); // inner type and constructor are private
 
 pub fn authorize_filters(
     authenticated_keys: &BTreeSet<nostr::PublicKey>,
@@ -141,7 +137,7 @@ Run: `cargo test -p deaddrop-protocol-core --test filter_policy`
 
 - [ ] **Step 3: Implement closed typed queries**
 
-Parse exact route tags, retain only safe secondary constraints, and reject ambiguous filters instead of broadening them.
+Parse exact route tags, retain only safe secondary constraints, and reject ambiguous filters instead of broadening them. Keep constructors and fields private; expose read-only accessors for storage so another crate cannot forge an authorization result.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -171,11 +167,7 @@ pub enum EventClass {
 }
 
 pub struct ValidatedEvent {
-    pub event: nostr::Event,
-    pub class: EventClass,
-    pub received_at: u64,
-    pub expires_at: Option<u64>,
-    pub replacement: Option<ReplacementKey>,
+    /* all fields private; read-only accessors only */
 }
 
 pub fn validate_write(
@@ -197,7 +189,7 @@ Run: `cargo test -p deaddrop-protocol-core --test event_policy`
 
 - [ ] **Step 3: Implement policy**
 
-Use `Event::verify()`. Default encrypted retention is seven days from trusted `received_at`; requested NIP-40 expiration may shorten it; the server caps storage at 30 days. Do not apply ordinary freshness windows to NIP-59 gift-wrap `created_at`.
+Use `Event::verify()`. Default encrypted retention is seven days from trusted `received_at`; requested NIP-40 expiration may shorten it; the server caps storage at 30 days. Do not apply ordinary freshness windows to NIP-59 gift-wrap `created_at`. Seal `ValidatedEvent` construction inside policy code so persistence cannot accept a caller-fabricated validation proof.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -213,9 +205,11 @@ Commit: `feat: validate deaddrop relay event classes`
 
 - Create: `crates/relay-core/src/auth.rs`
 - Create: `crates/relay-core/src/session.rs`
+- Create: `crates/relay-core/src/hub.rs`
 - Create: `crates/relay-core/src/store.rs`
 - Create: `crates/relay-core/tests/auth.rs`
 - Create: `crates/relay-core/tests/session.rs`
+- Create: `crates/relay-core/tests/hub.rs`
 - Modify: `crates/relay-core/src/lib.rs`
 
 **Interfaces:**
@@ -225,6 +219,7 @@ pub trait Clock { fn now_seconds(&self) -> u64; }
 pub trait ChallengeSource { fn fill(&mut self, output: &mut [u8]); }
 
 pub struct Session<S, C, R> { /* one connection only */ }
+pub struct RelayHub<S> { /* cross-connection subscriptions and bounded fan-out */ }
 
 pub enum SessionOutput {
     Send(nostr::RelayMessage),
@@ -237,7 +232,7 @@ pub enum SessionOutput {
 
 - [ ] **Step 1: Write failing authentication tests**
 
-Prove unique connection challenges; exact configured relay URL; exact single `relay` and `challenge` tags; kind `22242`; valid ID/signature; ±10-minute freshness; cross-connection replay rejection; multiple sequential authenticated pubkeys on one connection as required by NIP-42; and that auth events are never persisted or broadcast.
+Prove unique connection challenges; exact configured relay URL; exact single `relay` and `challenge` tags; kind `22242`; valid ID/signature; ±10-minute freshness; cross-connection replay rejection; multiple sequential authenticated pubkeys on one connection as required by NIP-42; and that auth events are never persisted or broadcast. An invalid AUTH after successful authentication must clear authenticated keys and subscriptions, rotate the challenge, and require a new successful AUTH before further reads or writes.
 
 - [ ] **Step 2: Write failing session tests**
 
@@ -249,7 +244,7 @@ Keep a set of authenticated pubkeys for the connection. The challenge lasts for 
 
 - [ ] **Step 4: Test historical and live authorization**
 
-Seed unauthorized records into the fake store before negative tests. Exercise both stored query results and new-event fan-out, including an OR-filter whose later member is unauthorized.
+Seed unauthorized records into the fake store before negative tests. Add a `RelayHub` that owns the cross-session subscription registry and routes validated publishes to bounded per-session outputs using the same sealed `AuthorizedQuery` values as historical reads. Exercise stored queries and cross-connection live fan-out, including an OR-filter whose later member is unauthorized, subscription removal on disconnect/re-auth failure, deduplication across the history/live handoff, and slow-client isolation.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -310,6 +305,7 @@ Commit: `feat: persist authorized relay events in sqlite`
 - Create: `crates/server/src/config.rs`
 - Create: `crates/server/src/connection.rs`
 - Create: `crates/server/src/debug.rs`
+- Create: `crates/server/src/maintenance.rs`
 - Create: `crates/server/src/shutdown.rs`
 - Create: `crates/server/tests/config.rs`
 - Create: `crates/server/tests/debug_ws.rs`
@@ -324,11 +320,13 @@ Use real clients over loopback. Verify challenge-first NIP-42, frame byte limits
 
 - [ ] **Step 3: Implement server shell**
 
-Use `tokio-tungstenite` for the debug listener and feed frames into the socket-independent session engine. Persist through `relay-sqlite`. This phase must not expose a production TCP listener.
+Use `tokio-tungstenite` for the debug listener and feed frames into the socket-independent session engine and shared `RelayHub`. Persist through `relay-sqlite`. Start a bounded, shutdown-aware maintenance loop that invokes expiry compaction on an interval through an injected clock; this phase must not expose a production TCP listener.
 
 - [ ] **Step 4: Verify and commit**
 
 Run: `cargo test -p deaddrop-server`
+
+The integration suite must advance the fake clock and prove the maintenance loop physically removes expired rows without waiting for an explicit test call.
 
 Commit: `feat: serve authenticated relay on loopback debug websocket`
 
