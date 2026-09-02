@@ -2,7 +2,7 @@ use core::fmt;
 use std::collections::BTreeSet;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use nostr::{Event, Kind, PublicKey, Tag};
+use nostr::{Event, Kind, PublicKey, RelayUrl, Tag};
 use thiserror::Error;
 
 use crate::{KIND_KEY_PACKAGE, retention::encrypted_expiration};
@@ -96,13 +96,7 @@ pub fn validate_write(
             (EventClass::KeyPackage { d }, None)
         }
         Kind::GiftWrap => {
-            reject_unexpected_route_tags(event.tags.as_slice(), "p")?;
-            let recipient_value = exact_named_value(event.tags.as_slice(), "p", true)?;
-            let recipient =
-                PublicKey::from_hex(recipient_value).map_err(|_| EventPolicyError::InvalidRoute)?;
-            if recipient.to_hex() != recipient_value {
-                return Err(EventPolicyError::InvalidRoute);
-            }
+            let recipient = inbox_recipient(event.tags.as_slice())?;
             validate_nip44_payload(&event.content)?;
             let requested = expiration(event.tags.as_slice(), false)?;
             (
@@ -138,7 +132,7 @@ fn validate_key_package(tags: &[Tag], content: &str) -> Result<String, EventPoli
     const MULTI_VALUE_TAGS: [&str; 3] = ["mls_extensions", "mls_proposals", "app_components"];
 
     for name in SINGLE_VALUE_TAGS {
-        let value = exact_named_value(tags, name, false)?;
+        let value = exact_named_value(tags, name)?;
         match name {
             "mls_protocol_version" if value != "1.0" => {
                 return Err(EventPolicyError::InvalidRoute);
@@ -168,7 +162,23 @@ fn validate_key_package(tags: &[Tag], content: &str) -> Result<String, EventPoli
         return Err(EventPolicyError::InvalidPayload);
     }
 
-    Ok(exact_named_value(tags, "d", false)?.to_owned())
+    Ok(exact_named_value(tags, "d")?.to_owned())
+}
+
+fn inbox_recipient(tags: &[Tag]) -> Result<PublicKey, EventPolicyError> {
+    reject_unexpected_route_tags(tags, "p")?;
+    let values = exact_named_tag(tags, "p")?;
+    let valid_shape =
+        values.len() == 2 || (values.len() == 3 && RelayUrl::parse(&values[2]).is_ok());
+    if !valid_shape {
+        return Err(EventPolicyError::InvalidRoute);
+    }
+    let value = &values[1];
+    let recipient = PublicKey::from_hex(value).map_err(|_| EventPolicyError::InvalidRoute)?;
+    if recipient.to_hex() != *value {
+        return Err(EventPolicyError::InvalidRoute);
+    }
+    Ok(recipient)
 }
 
 fn exact_named_values<'a>(tags: &'a [Tag], name: &str) -> Result<&'a [String], EventPolicyError> {
@@ -266,11 +276,15 @@ fn require_authenticated_author(
     }
 }
 
-fn exact_named_value<'a>(
-    tags: &'a [Tag],
-    name: &str,
-    permit_trailing_fields: bool,
-) -> Result<&'a str, EventPolicyError> {
+fn exact_named_value<'a>(tags: &'a [Tag], name: &str) -> Result<&'a str, EventPolicyError> {
+    let values = exact_named_tag(tags, name)?;
+    if values.len() != 2 || values[1].is_empty() {
+        return Err(EventPolicyError::InvalidRoute);
+    }
+    Ok(&values[1])
+}
+
+fn exact_named_tag<'a>(tags: &'a [Tag], name: &str) -> Result<&'a [String], EventPolicyError> {
     let mut matches = tags
         .iter()
         .filter(|tag| tag.as_slice().first().is_some_and(|value| value == name));
@@ -278,15 +292,7 @@ fn exact_named_value<'a>(
     if matches.next().is_some() {
         return Err(EventPolicyError::InvalidRoute);
     }
-    let values = tag.as_slice();
-    if values.len() < 2 || (!permit_trailing_fields && values.len() != 2) {
-        return Err(EventPolicyError::InvalidRoute);
-    }
-    let value = values[1].as_str();
-    if value.is_empty() {
-        return Err(EventPolicyError::InvalidRoute);
-    }
-    Ok(value)
+    Ok(tag.as_slice())
 }
 
 fn expiration(tags: &[Tag], reject_unknown: bool) -> Result<Option<u64>, EventPolicyError> {
@@ -313,7 +319,7 @@ fn expiration(tags: &[Tag], reject_unknown: bool) -> Result<Option<u64>, EventPo
 }
 
 fn group_route(tags: &[Tag]) -> Result<([u8; 32], Option<u64>), EventPolicyError> {
-    let value = exact_named_value(tags, "h", false)?;
+    let value = exact_named_value(tags, "h")?;
     let h = decode_lower_hex_32(value).ok_or(EventPolicyError::InvalidRoute)?;
     let expiration = expiration(tags, true)?;
     Ok((h, expiration))

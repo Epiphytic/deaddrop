@@ -230,23 +230,23 @@ pub enum SessionOutput {
 }
 ```
 
-- [ ] **Step 1: Write failing authentication tests**
+- [x] **Step 1: Write failing authentication tests**
 
 Prove unique connection challenges; exact configured relay URL; exact single `relay` and `challenge` tags; kind `22242`; valid ID/signature; ±10-minute freshness; cross-connection replay rejection; multiple sequential authenticated pubkeys on one connection as required by NIP-42; and that auth events are never persisted or broadcast. An invalid AUTH after successful authentication must clear authenticated keys and subscriptions, rotate the challenge, and require a new successful AUTH before further reads or writes.
 
-- [ ] **Step 2: Write failing session tests**
+- [x] **Step 2: Write failing session tests**
 
 Before AUTH, `REQ` returns `CLOSED auth-required:` and `EVENT` returns `OK false auth-required:`. After AUTH, reads/writes call only typed policy/store ports. Test `REQ`, subscription replacement, `CLOSE`, `EVENT`, `OK`, `EOSE`, idempotency, per-connection limits, bounded pending output, and slow-consumer closure.
 
-- [ ] **Step 3: Implement with deterministic clock/RNG and fake store**
+- [x] **Step 3: Implement with deterministic clock/RNG and fake store**
 
 Keep a set of authenticated pubkeys for the connection. The challenge lasts for that connection until deliberately rotated; an AUTH event from one connection cannot migrate to another.
 
-- [ ] **Step 4: Test historical and live authorization**
+- [x] **Step 4: Test historical and live authorization**
 
 Seed unauthorized records into the fake store before negative tests. Add a `RelayHub` that owns the cross-session subscription registry and routes validated publishes to bounded per-session outputs using the same sealed `AuthorizedQuery` values as historical reads. Exercise stored queries and cross-connection live fan-out, including an OR-filter whose later member is unauthorized, subscription removal on disconnect/re-auth failure, deduplication across the history/live handoff, and slow-client isolation.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 

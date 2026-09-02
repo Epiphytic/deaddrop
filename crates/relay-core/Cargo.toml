@@ -7,7 +7,11 @@ rust-version.workspace = true
 
 [dependencies]
 deaddrop-protocol-core = { path = "../protocol-core" }
+futures = "0.3"
 nostr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+base64.workspace = true

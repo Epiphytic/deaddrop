@@ -237,6 +237,22 @@ fn gift_wrap_requires_one_canonical_recipient_but_matches_marmot_route_shape() {
         ));
     }
 
+    for tags in [
+        vec![tag(&["p", &recipient_hex, "not-a-relay-url"])],
+        vec![tag(&[
+            "p",
+            &recipient_hex,
+            "wss://relay.invalid",
+            "unexpected",
+        ])],
+    ] {
+        let event = signed_event(&disposable, Kind::GiftWrap, tags, nip44_content());
+        assert!(matches!(
+            validate_write(&authenticated(&connection), RECEIVED_AT, event),
+            Err(EventPolicyError::InvalidRoute)
+        ));
+    }
+
     let unknown_route = signed_event(
         &disposable,
         Kind::GiftWrap,
