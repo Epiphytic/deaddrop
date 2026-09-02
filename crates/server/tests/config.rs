@@ -38,7 +38,10 @@ fn loopback_v4_and_v6_are_safe() {
     for bind in ["127.0.0.1:0", "[::1]:0"] {
         let Cli {
             command: Command::Debug(config),
-        } = parse(bind, false);
+        } = parse(bind, false)
+        else {
+            panic!("expected debug command")
+        };
         assert_eq!(config.data_dir, PathBuf::from("/tmp/deaddrop-test-state"));
         assert!(!config.unsafe_debug_bind);
         config.validate_bind_policy().expect("loopback is safe");
@@ -50,7 +53,10 @@ fn wildcard_lan_and_public_addresses_are_rejected_by_default() {
     for bind in ["0.0.0.0:0", "[::]:0", "192.168.1.10:0", "8.8.8.8:0"] {
         let Cli {
             command: Command::Debug(config),
-        } = parse(bind, false);
+        } = parse(bind, false)
+        else {
+            panic!("expected debug command")
+        };
         assert_eq!(
             config.validate_bind_policy(),
             Err(BindPolicyError::UnsafeAddress(
@@ -64,7 +70,10 @@ fn wildcard_lan_and_public_addresses_are_rejected_by_default() {
 fn explicit_unsafe_flag_allows_non_loopback_bind() {
     let Cli {
         command: Command::Debug(config),
-    } = parse("0.0.0.0:0", true);
+    } = parse("0.0.0.0:0", true)
+    else {
+        panic!("expected debug command")
+    };
     config
         .validate_bind_policy()
         .expect("explicit unsafe override should allow bind");

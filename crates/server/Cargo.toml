@@ -17,11 +17,14 @@ clap = { version = "4.5", features = ["derive"] }
 deaddrop-relay-core = { path = "../relay-core" }
 deaddrop-relay-sqlite = { path = "../relay-sqlite" }
 futures = "0.3"
+fs2 = "0.4"
 getrandom = "0.3"
 http-body-util = "0.1.5"
 hyper = { version = "1.11.1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
+hypertor = { version = "=0.3.0", default-features = false, features = ["server", "rustls", "static-sqlite"] }
 nostr.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "1.47", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

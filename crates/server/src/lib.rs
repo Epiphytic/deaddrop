@@ -3,7 +3,9 @@
 pub mod config;
 pub mod debug;
 pub mod maintenance;
+pub mod onion;
 pub mod shutdown;
+pub mod state;
 
 mod connection;
 #[cfg_attr(not(test), allow(dead_code))]

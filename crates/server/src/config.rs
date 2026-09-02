@@ -13,8 +13,31 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Run the production embedded onion relay.
+    Relay(RelayConfig),
     /// Run the explicit TCP/WebSocket debugging endpoint.
     Debug(DebugConfig),
+}
+
+/// Production relay configuration.
+///
+/// Network identity and exposure settings are intentionally not configurable:
+/// the process hosts one persistent onion service on virtual port 80.
+#[derive(Debug, Args)]
+pub struct RelayConfig {
+    /// Private directory containing the onion identity and relay database.
+    #[arg(long)]
+    pub data_dir: PathBuf,
+}
+
+impl RelayConfig {
+    pub fn virtual_port(&self) -> u16 {
+        80
+    }
+
+    pub fn nickname(&self) -> &'static str {
+        "deaddrop-relay"
+    }
 }
 
 #[derive(Debug, Args)]
