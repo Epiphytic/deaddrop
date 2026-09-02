@@ -341,7 +341,7 @@ Commit: `feat: serve authenticated relay on loopback debug websocket`
 - Modify: `.github/workflows/feasibility.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Build the end-to-end loopback test**
+- [x] **Step 1: Build the end-to-end loopback test**
 
 Use a temporary SQLite database and real keys A, B, and disposable C. Prove:
 
@@ -353,15 +353,15 @@ Use a temporary SQLite database and real keys A, B, and disposable C. Prove:
 - valid `1059`/`445` outer-author mismatch succeeds;
 - restart, replacement, deduplication, expiration, and compaction preserve the same rules.
 
-- [ ] **Step 2: Add listener and WASM regression guards**
+- [x] **Step 2: Add listener and WASM regression guards**
 
 CI builds both core crates for `wasm32-unknown-unknown`, runs all native tests, and audits that only the explicit debug test process opens a TCP listener. No test may pass merely because no private fixture was stored.
 
-- [ ] **Step 3: Document the phase boundary**
+- [x] **Step 3: Document the phase boundary**
 
 Document debug usage and warn that it is not the production Tor endpoint. Link the next plan: raw embedded Arti onion WebSocket/static hosting over the same relay engine.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 ```bash
 cargo fmt --all -- --check
@@ -374,7 +374,7 @@ npm run check:pins
 git diff --check
 ```
 
-- [ ] **Step 5: Request code review and commit**
+- [x] **Step 5: Request code review and commit**
 
 Commit: `test: prove authenticated relay isolation`
 
