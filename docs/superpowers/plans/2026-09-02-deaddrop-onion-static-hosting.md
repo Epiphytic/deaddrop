@@ -178,23 +178,23 @@ Commit: `feat: serve embedded app and relay over http streams`
 - Create: `crates/server/tests/relay_config.rs`
 - Create: `crates/server/tests/onion_lifecycle.rs`
 
-- [ ] **Step 1: Write failing production configuration tests**
+- [x] **Step 1: Write failing production configuration tests**
 
 Require `deaddrop relay --data-dir <path>`. Prove the relay config contains no bind, host, port, assets directory, SOCKS, proxy, or fallback field/flag; fixed virtual port 80 and nickname `deaddrop-relay` select the persistent identity. Reject missing, parent-traversing, symlinked, non-directory, and group/world-accessible state paths before Tor starts. Acquire and retain an exclusive owner-only process lock before opening SQLite or Arti so a second relay cannot share the identity/database concurrently.
 
-- [ ] **Step 2: Launch hardened raw `OnionService` streams**
+- [x] **Step 2: Launch hardened raw `OnionService` streams**
 
 Store Arti state at `<data-dir>/tor`; use `hypertor = 0.3.0` with only `server`, `rustls`, and `static-sqlite`. Enable full vanguards, a small per-circuit stream cap, and an introduction token bucket. Do not enable client, SOCKS, WebSocket-client, proof-of-work, or a TCP reverse proxy in the production dependency. Inspect every existing path component with `symlink_metadata`, reject lexical `..` before mutation, and do not reuse the probe's final-directory-only permission helper unchanged. Model identity state explicitly: `fresh` means no manifest, Tor state, or relay database; `resume` requires a valid manifest; any nonempty/previously initialized directory with an absent or malformed manifest is `lost/incomplete` and fails closed before launch. After a fresh `OnionService::launch()` and address derivation, but before accepting streams or announcing readiness, write an owner-only manifest to a same-directory temporary file, `fsync` it, atomically rename it, and `fsync` the parent directory. On resume, launch and compare the derived address to the manifest before accepting traffic; on mismatch immediately drop the service and fail. Do not claim that hypertor confirms descriptor upload or that a mismatched descriptor was never briefly published: the pinned API exposes neither guarantee.
 
-- [ ] **Step 3: Supervise the onion HTTP host**
+- [x] **Step 3: Supervise the onion HTTP host**
 
 Feed each already-accepted `OnionStream` into Task 4's bounded HTTP/upgrade supervisor with `try_submit`; hypertor exposes streams only after its own bounded internal accept queue, so excess application streams are immediately dropped rather than pretending admission can precede Arti acceptance. Hold supervisor permits across HTTP upgrades and stop accepting by dropping `OnionService` on shutdown. A closed accept stream or failed HTTP supervisor triggers orderly global shutdown and nonzero status. If onion launch fails after SQLite opens, fully shut down the shared runtime.
 
-- [ ] **Step 4: Publish a stable machine-readable startup record**
+- [x] **Step 4: Publish a stable machine-readable startup record**
 
 After launch, manifest validation/durability, and host readiness, print exactly one stdout JSON record containing public `onion_url` and `relay_url`; do not call it descriptor-upload confirmation because hypertor exposes no such signal. Keep structured redacted diagnostics on stderr and never log private keys, challenges, event content/IDs, full `h`, or state internals. `run_until_ctrl_c` must unpublish first, then drain the shared runtime.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run config/lifecycle tests, `cargo test -p deaddrop-server`, a release build, and `cargo tree -p deaddrop-server -e normal,build` to confirm the production graph contains neither SOCKS nor hypertor's client WebSocket feature. Dev-only live-client features may appear in test graphs and must not be mistaken for the release graph.
 
