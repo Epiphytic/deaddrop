@@ -275,19 +275,19 @@ Commit: `feat: add authenticated relay session engine`
 
 Store canonical event JSON with denormalized `kind`, `pubkey`, `created_at`, `received_at`, `d_tag`, `p_tag`, `h_tag`, `expires_at`, and replacement coordinate. Index only public, recipient, capability, replacement, and expiry access paths.
 
-- [ ] **Step 1: Write failing migration/store tests**
+- [x] **Step 1: Write failing migration/store tests**
 
 Cover fresh migration, reopen/restart, permission restriction, idempotent event IDs, exact public/inbox/group queries, no raw-filter API, transactional replacement, rollback, expiration-on-read, and compaction.
 
-- [ ] **Step 2: Write replacement-order tests**
+- [x] **Step 2: Write replacement-order tests**
 
 Kind `0` replaces by `(pubkey, kind)` and `30443` by `(pubkey, kind, d)`. Newer `created_at` wins; equal timestamps use the NIP-01 event-ID ordering. Test both arrival orders.
 
-- [ ] **Step 3: Implement a dedicated DB worker**
+- [x] **Step 3: Implement a dedicated DB worker**
 
 Use a bounded command channel and oneshot responses around one `rusqlite::Connection`; never share `Arc<Connection>` or block Tokio executor threads. Enable foreign keys and busy timeout. Make writes and replacement decisions transactional.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `cargo test -p deaddrop-relay-sqlite`
 

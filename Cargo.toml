@@ -5,6 +5,7 @@ members = [
     "crates/onion-probe",
     "crates/protocol-core",
     "crates/relay-core",
+    "crates/relay-sqlite",
 ]
 
 [workspace.package]
