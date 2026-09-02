@@ -1,26 +1,18 @@
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf};
 
-use deaddrop_relay_core::{RelayHub, SessionTask};
-use deaddrop_relay_sqlite::{Error as StoreError, SqliteStore};
+use deaddrop_relay_sqlite::Error as StoreError;
 use thiserror::Error;
 use tokio::{
     net::TcpListener,
-    sync::{Semaphore, mpsc},
-    task::{JoinError, JoinHandle, JoinSet},
+    task::{JoinError, JoinHandle},
 };
 
 use crate::{
     config::{BindPolicyError, DebugConfig},
-    connection::{SystemClock, TaskSubmitter, serve_connection},
-    maintenance::run_maintenance,
-    shutdown::{ShutdownSignal, ShutdownTrigger, shutdown_channel},
+    connection::serve_connection,
+    runtime::{ConnectionAdmissionError, Error as RuntimeError, RelayRuntime},
+    shutdown::ShutdownTrigger,
 };
-
-const SQLITE_QUEUE_CAPACITY: usize = 64;
-const ACCEPTED_TASK_CAPACITY: usize = 128;
-const ACCEPTED_TASK_CONCURRENCY: usize = 32;
-const CONNECTION_CAPACITY: usize = 32;
-const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -38,6 +30,8 @@ pub enum Error {
     Join(#[from] JoinError),
     #[error("expiry maintenance stopped unexpectedly")]
     MaintenanceStopped,
+    #[error("relay task supervisor stopped unexpectedly")]
+    TaskSupervisorStopped,
 }
 
 /// A running explicit debug listener. No production TCP listener is started.
@@ -50,13 +44,41 @@ pub struct DebugServer {
 impl DebugServer {
     pub async fn start(config: DebugConfig) -> Result<Self, Error> {
         config.validate_bind_policy()?;
-        let listener = TcpListener::bind(config.bind).await.map_err(Error::Bind)?;
-        let bound_addr = listener.local_addr().map_err(Error::LocalAddress)?;
         let database_path = database_path(&config.data_dir);
-        let store = SqliteStore::open(database_path, SQLITE_QUEUE_CAPACITY).await?;
-        let hub = RelayHub::new(store.clone());
-        let (shutdown, signal) = shutdown_channel();
-        let completion = tokio::spawn(run_server(listener, hub, store, shutdown.clone(), signal));
+        let runtime = RelayRuntime::start(database_path)
+            .await
+            .map_err(map_runtime_error)?;
+        Self::finish_start(config.bind, runtime).await
+    }
+
+    #[cfg(test)]
+    async fn start_after_store_open<F>(config: DebugConfig, after_open: F) -> Result<Self, Error>
+    where
+        F: FnOnce(&deaddrop_relay_sqlite::SqliteStore),
+    {
+        config.validate_bind_policy()?;
+        let database_path = database_path(&config.data_dir);
+        let runtime = RelayRuntime::start_after_open(database_path, after_open)
+            .await
+            .map_err(map_runtime_error)?;
+        Self::finish_start(config.bind, runtime).await
+    }
+
+    async fn finish_start(bind: SocketAddr, runtime: RelayRuntime) -> Result<Self, Error> {
+        let listener = match TcpListener::bind(bind).await {
+            Ok(listener) => listener,
+            Err(error) => {
+                return Err(cleanup_start_failure(runtime, Error::Bind(error)).await);
+            }
+        };
+        let bound_addr = match listener.local_addr() {
+            Ok(bound_addr) => bound_addr,
+            Err(error) => {
+                return Err(cleanup_start_failure(runtime, Error::LocalAddress(error)).await);
+            }
+        };
+        let shutdown = runtime.shutdown_trigger();
+        let completion = tokio::spawn(run_server(listener, runtime));
         Ok(Self {
             bound_addr,
             shutdown,
@@ -95,43 +117,19 @@ fn database_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("relay.sqlite3")
 }
 
-async fn run_server(
-    listener: TcpListener,
-    hub: RelayHub<SqliteStore>,
-    store: SqliteStore,
-    shutdown_trigger: ShutdownTrigger,
-    mut shutdown: ShutdownSignal,
-) -> Result<(), Error> {
-    let (task_sender, task_receiver) = mpsc::channel(ACCEPTED_TASK_CAPACITY);
-    let supervisor = tokio::spawn(supervise_tasks(task_receiver, ACCEPTED_TASK_CONCURRENCY));
-    let (maintenance_stop, maintenance_signal) = shutdown_channel();
-    let mut maintenance = tokio::spawn(run_maintenance(
-        store.clone(),
-        SystemClock,
-        MAINTENANCE_INTERVAL,
-        maintenance_signal,
-    ));
-    let mut connections = JoinSet::new();
-    let connection_slots = std::sync::Arc::new(Semaphore::new(CONNECTION_CAPACITY));
-    let mut maintenance_finished = None;
+async fn run_server(listener: TcpListener, runtime: RelayRuntime) -> Result<(), Error> {
+    let handle = runtime.handle();
+    let mut shutdown = handle.shutdown_signal();
+    let mut runtime_done = runtime.completion_signal();
 
     loop {
         tokio::select! {
             biased;
             _ = shutdown.cancelled() => break,
-            result = &mut maintenance => {
-                maintenance_finished = Some(result);
-                shutdown_trigger.trigger();
-                break;
-            }
+            _ = runtime_done.cancelled() => break,
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer)) => {
-                        let Ok(permit) = connection_slots.clone().try_acquire_owned() else {
-                            tracing::warn!(event = "debug_connection_rejected", reason = "connection-capacity");
-                            drop(stream);
-                            continue;
-                        };
                         let local_addr = match stream.local_addr() {
                             Ok(local_addr) => local_addr,
                             Err(error) => {
@@ -147,11 +145,10 @@ async fn run_server(
                             }
                         };
                         tracing::debug!(event = "debug_connection_opened", peer = %peer);
-                        let connection_hub = hub.clone();
-                        let connection_tasks = TaskSubmitter::new(task_sender.clone());
-                        let connection_shutdown = shutdown.clone();
-                        connections.spawn(async move {
-                            let _permit = permit;
+                        let connection_hub = handle.hub();
+                        let connection_tasks = handle.task_submitter();
+                        let connection_shutdown = handle.shutdown_signal();
+                        match handle.try_register_connection(async move {
                             serve_connection(
                                 stream,
                                 peer,
@@ -160,153 +157,113 @@ async fn run_server(
                                 connection_tasks,
                                 connection_shutdown,
                             ).await;
-                        });
+                        }) {
+                            Ok(()) => {}
+                            Err(ConnectionAdmissionError::AtCapacity) => {
+                                tracing::warn!(event = "debug_connection_rejected", reason = "connection-capacity");
+                            }
+                            Err(ConnectionAdmissionError::ShuttingDown) => break,
+                        }
                     }
                     Err(error) => {
                         tracing::warn!(event = "debug_accept_failed", error_kind = ?error.kind());
                     }
                 }
             }
-            Some(result) = connections.join_next(), if !connections.is_empty() => {
-                if let Err(error) = result {
-                    tracing::warn!(event = "debug_connection_task_failed", cancelled = error.is_cancelled(), panicked = error.is_panic());
-                }
-            }
         }
     }
 
-    // Stop accepting, let sockets observe shutdown, and only then close task
-    // admission. Every returned SessionTask is therefore either queued or was
-    // completed inline by its submitting connection.
     drop(listener);
-    while let Some(result) = connections.join_next().await {
-        if let Err(error) = result {
-            tracing::warn!(
-                event = "debug_connection_task_failed",
-                cancelled = error.is_cancelled(),
-                panicked = error.is_panic()
-            );
-        }
-    }
-    drop(task_sender);
-    if let Err(error) = supervisor.await {
-        tracing::error!(
-            event = "relay_task_supervisor_failed",
-            cancelled = error.is_cancelled(),
-            panicked = error.is_panic()
-        );
-    }
+    runtime.shutdown().await.map_err(map_runtime_error)
+}
 
-    let maintenance_was_early = maintenance_finished.is_some();
-    let maintenance_result = if let Some(result) = maintenance_finished {
-        result
-    } else {
-        maintenance_stop.trigger();
-        maintenance.await
-    };
-    store.shutdown().await?;
-    match maintenance_result {
-        Ok(Ok(())) if maintenance_was_early => Err(Error::MaintenanceStopped),
-        Ok(result) => result.map_err(Error::Store),
-        Err(error) => Err(Error::Join(error)),
+fn map_runtime_error(error: RuntimeError) -> Error {
+    match error {
+        RuntimeError::Store(error) => Error::Store(error),
+        RuntimeError::RuntimeJoin(error)
+        | RuntimeError::MaintenanceJoin(error)
+        | RuntimeError::TaskSupervisorJoin(error) => Error::Join(error),
+        RuntimeError::MaintenanceStopped => Error::MaintenanceStopped,
+        RuntimeError::TaskSupervisorStopped => Error::TaskSupervisorStopped,
     }
 }
 
-async fn supervise_tasks(mut receiver: mpsc::Receiver<SessionTask>, max_running: usize) {
-    assert!(max_running > 0, "task concurrency must be non-zero");
-    let mut running = JoinSet::new();
-    loop {
-        if running.len() >= max_running {
-            if let Some(Err(error)) = running.join_next().await {
-                tracing::error!(
-                    event = "relay_session_task_failed",
-                    cancelled = error.is_cancelled(),
-                    panicked = error.is_panic()
-                );
-            }
-            continue;
-        }
-        tokio::select! {
-            maybe_task = receiver.recv() => match maybe_task {
-                Some(task) => { running.spawn(task); }
-                None => break,
-            },
-            Some(result) = running.join_next(), if !running.is_empty() => {
-                if let Err(error) = result {
-                    tracing::error!(event = "relay_session_task_failed", cancelled = error.is_cancelled(), panicked = error.is_panic());
-                }
-            }
-        }
-    }
-    while let Some(result) = running.join_next().await {
-        if let Err(error) = result {
-            tracing::error!(
-                event = "relay_session_task_failed",
-                cancelled = error.is_cancelled(),
-                panicked = error.is_panic()
+async fn cleanup_start_failure(runtime: RelayRuntime, primary: Error) -> Error {
+    match runtime.shutdown().await {
+        Ok(()) => primary,
+        Err(_) => {
+            tracing::warn!(
+                event = "debug_startup_cleanup_failed",
+                reason = "relay-runtime-shutdown"
             );
+            primary
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
     };
 
-    use tokio::{sync::Semaphore, time::timeout};
+    use deaddrop_relay_sqlite::SqliteStore;
+    use tempfile::TempDir;
 
     use super::*;
 
-    fn gated_task(
-        active: Arc<AtomicUsize>,
-        peak: Arc<AtomicUsize>,
-        release: Arc<Semaphore>,
-    ) -> SessionTask {
-        Box::pin(async move {
-            let current = active.fetch_add(1, Ordering::AcqRel) + 1;
-            peak.fetch_max(current, Ordering::AcqRel);
-            let permit = release.acquire().await.unwrap();
-            permit.forget();
-            active.fetch_sub(1, Ordering::AcqRel);
-        })
+    #[tokio::test]
+    async fn bind_failure_after_store_open_closes_sqlite_worker() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let temp = TempDir::new().unwrap();
+        let captured: Arc<Mutex<Option<SqliteStore>>> = Arc::new(Mutex::new(None));
+        let capture = Arc::clone(&captured);
+        let result = DebugServer::start_after_store_open(
+            DebugConfig {
+                bind: occupied.local_addr().unwrap(),
+                data_dir: temp.path().join("state"),
+                unsafe_debug_bind: false,
+            },
+            move |store| {
+                *capture.lock().unwrap() = Some(store.clone());
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(Error::Bind(_))));
+        let store = captured.lock().unwrap().take().unwrap();
+        assert!(matches!(
+            store.compact(1_700_000_000).await,
+            Err(StoreError::WorkerStopped)
+        ));
     }
 
     #[tokio::test]
-    async fn task_supervisor_bounds_running_work_and_channel_backpressure() {
-        let (sender, receiver) = mpsc::channel(1);
-        let supervisor = tokio::spawn(supervise_tasks(receiver, 1));
-        let active = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
-        let release = Arc::new(Semaphore::new(0));
-
-        sender
-            .send(gated_task(active.clone(), peak.clone(), release.clone()))
+    async fn runtime_panic_stops_listener_and_surfaces_join_error() {
+        let temp = TempDir::new().unwrap();
+        let runtime = RelayRuntime::start_panicking(temp.path().join("state/relay.sqlite3"))
             .await
             .unwrap();
-        while active.load(Ordering::Acquire) == 0 {
-            tokio::task::yield_now().await;
-        }
-        sender
-            .send(gated_task(active.clone(), peak.clone(), release.clone()))
+        let server = DebugServer::finish_start("127.0.0.1:0".parse().unwrap(), runtime)
             .await
             .unwrap();
-        let mut third =
-            Box::pin(sender.send(gated_task(active.clone(), peak.clone(), release.clone())));
-        assert!(
-            timeout(Duration::from_millis(20), &mut third)
-                .await
-                .is_err(),
-            "a full bounded supervisor must backpressure submission"
-        );
+        let bound_addr = server.bound_addr;
+        let result = tokio::time::timeout(Duration::from_secs(1), server.completion)
+            .await
+            .expect("runtime panic left listener admission running")
+            .unwrap();
+        assert!(matches!(result, Err(Error::Join(_))));
+        assert!(TcpListener::bind(bound_addr).await.is_ok());
+    }
 
-        release.add_permits(1);
-        third.await.unwrap();
-        release.add_permits(2);
-        drop(sender);
-        supervisor.await.unwrap();
-        assert_eq!(peak.load(Ordering::Acquire), 1);
+    #[tokio::test]
+    async fn bind_error_remains_primary_when_runtime_cleanup_fails() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let temp = TempDir::new().unwrap();
+        let runtime = RelayRuntime::start_panicking(temp.path().join("state/relay.sqlite3"))
+            .await
+            .unwrap();
+        let result = DebugServer::finish_start(occupied.local_addr().unwrap(), runtime).await;
+        assert!(matches!(result, Err(Error::Bind(_))));
     }
 }

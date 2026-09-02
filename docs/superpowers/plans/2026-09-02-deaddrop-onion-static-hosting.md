@@ -74,23 +74,23 @@ Commit: `refactor: share relay websocket driver across transports`
 - Modify: `crates/server/src/debug.rs`
 - Modify: `crates/server/src/connection.rs`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 In source-unit tests, exercise startup failure after SQLite opens, maintenance failure, half-open connection shutdown, a disconnected publisher whose accepted write is still pending, a saturated connection/task queue, and shutdown while generic connection/session work is being admitted. Assert no accepted database write or hub fan-out is abandoned. The upgrade-specific admission race belongs to Task 4.
 
-- [ ] **Step 2: Introduce one shared runtime owner**
+- [x] **Step 2: Introduce one shared runtime owner**
 
 Move SQLite opening, `RelayHub`, bounded session-task supervision, maintenance, shutdown signaling, and capacities out of `debug.rs`. Expose only narrow handles for registering connection work and handing off `SessionTask`s; do not expose raw store writes to transports.
 
-- [ ] **Step 3: Preserve strict shutdown ordering**
+- [x] **Step 3: Preserve strict shutdown ordering**
 
 Stop transport admission, notify and await connection/upgrade tasks, close session-task admission, drain all accepted tasks, stop and await maintenance, then call `SqliteStore::shutdown()` last. If submission closes during handoff, finish already-accepted session work inline. Bound handshakes, socket writes, idle connections, and transport close; the complete already-accepted `SessionTask -> store -> hub fan-out -> store shutdown` chain is intentionally non-cancellable. Surface unexpected supervisor/maintenance termination as a server error.
 
-- [ ] **Step 4: Rewire debug mode without behavior changes**
+- [x] **Step 4: Rewire debug mode without behavior changes**
 
 Keep `DebugServer::{start,bound_addr,shutdown,run_until_ctrl_c}` and every Task 6/7 test green. `debug` remains the only role allowed to construct a `TcpListener`.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `cargo test -p deaddrop-server` and strict package Clippy.
 

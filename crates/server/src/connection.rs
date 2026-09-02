@@ -4,15 +4,14 @@ use std::{
 };
 
 use deaddrop_relay_core::{
-    ChallengeSource, Clock, RelayHub, Session, SessionLimits, SessionOutput, SessionTask,
-    WireLimits, parse_client_message,
+    ChallengeSource, Clock, RelayHub, Session, SessionLimits, SessionOutput, WireLimits,
+    parse_client_message,
 };
 use deaddrop_relay_sqlite::SqliteStore;
 use futures::{SinkExt, StreamExt};
 use nostr::{JsonUtil, RelayUrl};
 use tokio::{
     net::TcpStream,
-    sync::mpsc,
     time::{Instant, MissedTickBehavior, interval, sleep_until, timeout},
 };
 use tokio_tungstenite::{
@@ -23,7 +22,7 @@ use tokio_tungstenite::{
     },
 };
 
-use crate::shutdown::ShutdownSignal;
+use crate::{runtime::TaskSubmitter, shutdown::ShutdownSignal};
 
 pub(crate) const MAX_FRAME_BYTES: usize = 64 * 1024;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -47,23 +46,6 @@ struct OsChallengeSource;
 impl ChallengeSource for OsChallengeSource {
     fn fill(&mut self, output: &mut [u8]) {
         getrandom::fill(output).expect("operating system randomness unavailable");
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct TaskSubmitter(mpsc::Sender<SessionTask>);
-
-impl TaskSubmitter {
-    pub(crate) fn new(sender: mpsc::Sender<SessionTask>) -> Self {
-        Self(sender)
-    }
-
-    /// Once a session returns work, either transfer it to the server owner or
-    /// drive it inline if that owner is already closing. Never cancel it.
-    async fn submit(&self, task: SessionTask) {
-        if let Err(error) = self.0.send(task).await {
-            error.0.await;
-        }
     }
 }
 
@@ -429,7 +411,7 @@ mod tests {
     use nostr::{EventBuilder, Filter, Keys, Kind, SubscriptionId, Timestamp};
     use serde_json::{Value, json};
     use tempfile::TempDir;
-    use tokio::io::duplex;
+    use tokio::{io::duplex, sync::mpsc};
     use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
 
     use super::*;
