@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -10,6 +12,7 @@ import {
   isComplete,
   mandatoryChecks,
   modeSucceeded,
+  sanitizeEvidence,
 } from "./run-feasibility.mjs";
 
 const pass = Object.fromEntries(
@@ -83,6 +86,35 @@ test("successful commands need named test evidence", () => {
   const missing = commandWithEvidence(command, ["test browser_probe ... ok"]);
   assert.equal(missing.ok, false);
   assert.match(missing.reason, /missing expected evidence/);
+});
+
+test("live Tor execution requires an explicit exact opt-in", () => {
+  const env = { ...process.env };
+  delete env.DEADDROP_LIVE_TOR;
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./run-feasibility.mjs", import.meta.url)), "--live"],
+    { env, encoding: "utf8" },
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires the explicit DEADDROP_LIVE_TOR=1 opt-in/);
+});
+
+test("live evidence redacts onion addresses and event identifiers", () => {
+  const onion = `${"a".repeat(56)}.onion`;
+  const eventId = "0123456789abcdef".repeat(4);
+  const statePath = "/private/tmp/deaddrop-relay-live-AbCd12/state/relay.sqlite3";
+  const sanitized = sanitizeEvidence(
+    `GET http://${onion}/ EVENT {"id":"${eventId}"} ${statePath}`,
+  );
+
+  assert.equal(sanitized.includes(onion), false);
+  assert.equal(sanitized.includes(eventId), false);
+  assert.equal(sanitized.includes(statePath), false);
+  assert.match(sanitized, /\[redacted-onion\]/);
+  assert.match(sanitized, /\[redacted-event-id\]/);
+  assert.match(sanitized, /\[redacted-state-dir\]/);
 });
 
 test("the schema independently rejects an empty live PASS", async () => {

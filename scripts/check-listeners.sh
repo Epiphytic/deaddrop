@@ -38,9 +38,20 @@ trap cleanup EXIT HUP INT TERM
 
 command -v cargo >/dev/null 2>&1 || fail "cargo is required"
 command -v lsof >/dev/null 2>&1 || fail "lsof is required"
+command -v rg >/dev/null 2>&1 || fail "ripgrep is required"
 
 cd "$REPO_ROOT"
 cargo build --locked --target-dir "$REPO_ROOT/target" -p deaddrop-server --bin deaddrop
+
+LISTENER_SOURCE_FILES=$(rg -l '\bTcpListener\b' crates/server/src --glob '*.rs' | sort)
+[ "$LISTENER_SOURCE_FILES" = "crates/server/src/debug.rs" ] \
+    || fail "TcpListener must appear only in crates/server/src/debug.rs: $LISTENER_SOURCE_FILES"
+
+RELAY_HELP=$("$REPO_ROOT/target/debug/deaddrop" relay --help)
+RELAY_FLAGS=$(printf '%s\n' "$RELAY_HELP" | rg -o -- '--[a-z0-9-]+' | sort -u)
+EXPECTED_RELAY_FLAGS=$(printf '%s\n' --data-dir --help)
+[ "$RELAY_FLAGS" = "$EXPECTED_RELAY_FLAGS" ] \
+    || fail "production relay must accept only --data-dir (plus --help): $RELAY_FLAGS"
 
 SERVER_LOG="$AUDIT_ROOT/server.stderr"
 "$REPO_ROOT/target/debug/deaddrop" debug \

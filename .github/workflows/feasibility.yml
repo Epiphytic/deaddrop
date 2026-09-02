@@ -36,24 +36,33 @@ jobs:
         with:
           node-version: 22.22.2
           cache: npm
-      - run: sudo apt-get update && sudo apt-get install -y clang lsof
+      - run: sudo apt-get update && sudo apt-get install -y clang lsof ripgrep
       - run: npm ci
       - run: npm exec playwright install --with-deps chromium
       - run: cargo install wasm-pack --version 0.15.0 --locked
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Prove the production dependency graph is server-only
+        shell: bash
+        run: |
+          cargo build --locked --release -p deaddrop-server --bin deaddrop
+          cargo tree --locked -p deaddrop-server -e normal,build -f '{p} {f}' | tee /tmp/deaddrop-release-tree.txt
+          test "$(sed -n 's/.*hypertor v0.3.0 //p' /tmp/deaddrop-release-tree.txt | sort -u)" = "rustls,server,static-sqlite"
       - name: Build protocol core for browser WASM
         run: cargo build --locked -p deaddrop-protocol-core --target wasm32-unknown-unknown
       - name: Build relay core for browser WASM
         run: cargo build --locked -p deaddrop-relay-core --target wasm32-unknown-unknown
       - run: npm test
       - run: npm run check:pins
-      - name: Audit explicit debug listener
+      - name: Run deterministic script regressions
+        run: node --test scripts/*.test.mjs
+      - name: Audit shell syntax, source policy, and explicit debug listener
         run: |
-          bash -n scripts/check-listeners.sh
+          for script in scripts/*.sh; do bash -n "$script"; done
           scripts/check-listeners.sh
       - run: npm run feasibility:offline
+      - run: git diff --check
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -69,6 +78,7 @@ jobs:
     timeout-minutes: 45
     env:
       CC_wasm32_unknown_unknown: clang
+      DEADDROP_LIVE_TOR: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Remove checked-in evidence from this run
@@ -84,7 +94,7 @@ jobs:
         with:
           node-version: 22.22.2
           cache: npm
-      - run: sudo apt-get update && sudo apt-get install -y clang lsof
+      - run: sudo apt-get update && sudo apt-get install -y clang lsof ripgrep
       - run: npm ci
       - run: npm exec playwright install --with-deps chromium
       - run: cargo install wasm-pack --version 0.15.0 --locked

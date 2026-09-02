@@ -38,6 +38,9 @@ export function decide(records) {
 
 async function main() {
   const mode = parseMode(process.argv.slice(2));
+  if (mode === "live" && !liveTorEnabled(process.env.DEADDROP_LIVE_TOR)) {
+    throw new Error("live mode requires the explicit DEADDROP_LIVE_TOR=1 opt-in");
+  }
   await removeIfPresent(finalResultPath);
   await removeIfPresent(reportPath);
   await rm(logDir, { recursive: true, force: true });
@@ -109,18 +112,33 @@ async function main() {
     checks.transport_unit = record(browserUnit, false);
 
     if (mode === "live") {
-      const liveEnvironment = { ...process.env, DEADDROP_LIVE_TOR: "1" };
-      const nativeOnion = await runCommand(
-        "native-onion-live",
+      const liveEnvironment = process.env;
+      const relayOnion = await runCommand(
+        "relay-onion-live",
         "cargo",
-        ["test", "-p", "onion-probe", "--test", "live_persistence", "--", "--nocapture"],
-        600_000,
+        ["test", "--locked", "-p", "deaddrop-server", "--test", "live_onion", "--", "--nocapture"],
+        1_200_000,
         liveEnvironment,
       );
-      const nativeOnionEvidence = commandWithEvidence(nativeOnion, [
-        "test persistent_state_restores_the_same_onion_identity_without_a_tcp_listener ... ok",
+      const relayTestEvidence = commandWithEvidence(relayOnion, [
+        "test persistent_onion_serves_http_and_restores_private_authenticated_history ... ok",
       ]);
-      checks.native_onion_service = combine(onionUnit, nativeOnionEvidence);
+      const relayHttpEvidence = commandWithEvidence(relayTestEvidence, [
+        "live onion HTTP reachability: PASS",
+      ]);
+      const relayWebSocketEvidence = commandWithEvidence(relayTestEvidence, [
+        "live onion authenticated WebSocket persistence: PASS",
+      ]);
+      checks.relay_onion_http = record(relayHttpEvidence, true);
+      checks.relay_onion_authenticated_ws = record(relayWebSocketEvidence, true);
+      const completeRelayEvidence = {
+        ...relayOnion,
+        ok: relayHttpEvidence.ok && relayWebSocketEvidence.ok,
+        ...(!(relayHttpEvidence.ok && relayWebSocketEvidence.ok)
+          ? { reason: relayHttpEvidence.reason ?? relayWebSocketEvidence.reason }
+          : {}),
+      };
+      checks.native_onion_service = combine(onionUnit, completeRelayEvidence);
       executedChecks.add("native_onion_service");
 
       const nodeOnion = await runCommand(
@@ -173,6 +191,10 @@ function parseMode(args) {
     throw new Error("usage: node scripts/run-feasibility.mjs --offline|--live");
   }
   return args[0].slice(2);
+}
+
+export function liveTorEnabled(value) {
+  return value === "1";
 }
 
 function assign(checks, names, result, executedChecks) {
@@ -247,7 +269,7 @@ async function buildResult(mode, checks, executedChecks) {
     result.decision = decide(checks);
     const failed = mandatoryChecks.filter((name) => checks[name]?.status !== "PASS");
     result.next_action = failed.length === 0
-      ? "write the native relay implementation plan"
+      ? "write and execute the reduced client-WASM, vault, and npx plan"
       : `revise the failed design assumptions: ${failed.join(", ")}`;
   }
   return result;
@@ -300,7 +322,7 @@ async function runCommand(name, command, args, timeoutMs, env = process.env) {
   const logName = `${name}.log`;
   await writeFile(
     join(logDir, logName),
-    sanitize(`${result.stdout}\n${result.stderr}`),
+    sanitizeEvidence(`${result.stdout}\n${result.stderr}`),
     "utf8",
   );
   process.stderr.write(`${result.ok ? "✓" : "✗"} ${name} (${durationMs}ms)\n`);
@@ -376,12 +398,16 @@ function signalTree(child, signal) {
   }
 }
 
-function sanitize(text) {
+export function sanitizeEvidence(text) {
   return text
     .replace(/[a-z2-7]{56}\.onion/gi, "[redacted-onion]")
+    .replace(/\b[0-9a-f]{64}\b/gi, "[redacted-event-id]")
     .replace(/(?:\d{1,3}\.){3}\d{1,3}:\d+:u[A-Za-z0-9_-]+/g, "[redacted-kps]")
     .replace(/"state_dir":"[^"]+"/g, '"state_dir":"[redacted-state-dir]"')
-    .replace(/(?:\/[^\s"']+)*\/deaddrop-(?:node|browser)-probe-[^\s"']+/g, "[redacted-state-dir]");
+    .replace(
+      /(?:\/[^\s"']+)*\/deaddrop-(?:node-probe|browser-probe|relay-live|client-live)-[^\s"']+/g,
+      "[redacted-state-dir]",
+    );
 }
 
 async function renderReport(result) {
@@ -393,12 +419,12 @@ async function renderReport(result) {
     .map(([name, value]) => `| \`${name}\` | ${value.mandatory === false ? "optional" : "mandatory"} | ${value.status} | ${value.duration_ms ?? "—"} |`)
     .join("\n");
   const summary = passed
-    ? "The one-to-one proof passes the current Marmot profile in native Rust and real browser WASM, preserves state across restart, and reaches an embedded onion service from both Node Arti and browser Arti over a loopback-only KPS/WebRTC gateway."
+    ? "The one-to-one proof passes the current Marmot profile in native Rust and real browser WASM, preserves the production relay identity and private history across restart, reaches its static routes through embedded Arti, and completes an authenticated WebSocket round trip without a local proxy or listener."
     : "The complete one-to-one proof did not pass. The failed or unexecuted mandatory checks below must be resolved before implementation relies on the affected assumptions.";
   const sizeLine = size
     ? `The browser Marmot WASM produced by this run is ${size.uncompressed_bytes} bytes uncompressed and ${size.gzip_bytes} bytes with gzip. `
     : "No current successful browser Marmot WASM size is reported. ";
-  return `# Deaddrop feasibility result\n\nDecision: **${result.decision}**\n\n${summary} Snowflake remains optional and unsupported by the pinned tor-js public API; it is not a substitute for KPS.\n\n| Check | Requirement | Result | Duration (ms) |\n|---|---|---:|---:|\n${rows}\n\n${sizeLine}Machine-readable evidence is in [results.json](../../artifacts/feasibility/results.json). Sanitized command logs are under \`artifacts/feasibility/live-probe-logs/\` and contain no onion hostname, KPS capability address, private key, or state directory.\n\nNext action: ${result.next_action}.\n`;
+  return `# Deaddrop feasibility result\n\nDecision: **${result.decision}**\n\n${summary} Snowflake remains optional and unsupported by the pinned tor-js public API; it is not a substitute for KPS.\n\n| Check | Requirement | Result | Duration (ms) |\n|---|---|---:|---:|\n${rows}\n\n${sizeLine}Machine-readable evidence is in [results.json](../../artifacts/feasibility/results.json). Sanitized command logs are under \`artifacts/feasibility/live-probe-logs/\` and contain no onion hostname, event ID, KPS capability address, private key, or state directory. The \`relay_onion_http\` and \`relay_onion_authenticated_ws\` rows record separate evidence from the gated production-relay acceptance test.\n\nNext action: ${result.next_action}.\n`;
 }
 
 async function readJsonIfPresent(path) {
