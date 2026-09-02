@@ -310,19 +310,19 @@ Commit: `feat: persist authorized relay events in sqlite`
 - Create: `crates/server/tests/config.rs`
 - Create: `crates/server/tests/debug_ws.rs`
 
-- [ ] **Step 1: Write failing bind-policy tests**
+- [x] **Step 1: Write failing bind-policy tests**
 
 Require `deaddrop debug --bind <SocketAddr> --data-dir <path>`. Accept IPv4/IPv6 loopback. Reject wildcard, LAN, and public addresses unless `--unsafe-debug-bind` is also present. Verify the unsafe warning on stderr and the actual bound socket address.
 
-- [ ] **Step 2: Write failing WebSocket tests**
+- [x] **Step 2: Write failing WebSocket tests**
 
 Use real clients over loopback. Verify challenge-first NIP-42, frame byte limits, text-only protocol, bounded channels, clean close/shutdown, and structured logs with no secrets, content, full `h`, or auth challenge.
 
-- [ ] **Step 3: Implement server shell**
+- [x] **Step 3: Implement server shell**
 
 Use `tokio-tungstenite` for the debug listener and feed frames into the socket-independent session engine and shared `RelayHub`. Persist through `relay-sqlite`. Start a bounded, shutdown-aware maintenance loop that invokes expiry compaction on an interval through an injected clock; this phase must not expose a production TCP listener.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `cargo test -p deaddrop-server`
 

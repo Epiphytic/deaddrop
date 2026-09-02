@@ -6,6 +6,7 @@ members = [
     "crates/protocol-core",
     "crates/relay-core",
     "crates/relay-sqlite",
+    "crates/server",
 ]
 
 [workspace.package]
