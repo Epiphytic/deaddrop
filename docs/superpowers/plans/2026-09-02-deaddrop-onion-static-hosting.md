@@ -110,19 +110,19 @@ Commit: `refactor: centralize native relay lifecycle`
 - Create: `apps/web/styles.css`
 - Create: `apps/web/test/shell.test.mjs`
 
-- [ ] **Step 1: Write failing pure shell tests**
+- [x] **Step 1: Write failing pure shell tests**
 
 Test `#nprofile...` recognition, exact `npx deaddrop chat '<full-bootstrap-url>'` rendering, and safe `textContent` output. Assert the fragment is never placed in a request, log, cookie, storage API, or HTML sink.
 
-- [ ] **Step 2: Add a deterministic source-policy test**
+- [x] **Step 2: Add a deterministic source-policy test**
 
 Reject external URLs and runtime assets, inline script/style, `fetch`, `XMLHttpRequest`, native `WebSocket`, `EventSource`, service workers, storage, analytics, fonts, CDN, STUN, and TURN. The shell must have no install-time or runtime dependency.
 
-- [ ] **Step 3: Implement the minimal intentional UI**
+- [x] **Step 3: Implement the minimal intentional UI**
 
 Show the onion-hosted relay status, the same-origin future relay path, bootstrap-link detection, copyable future CLI instructions, and an explicit “messaging arrives in the next client phase” boundary. Use accessible semantic HTML, responsive local CSS, and no fake compose/chat controls.
 
-- [ ] **Step 4: Join the root workspace and verify**
+- [x] **Step 4: Join the root workspace and verify**
 
 Add `apps/*` to npm workspaces so `npm test` runs the shell tests. Update the lockfile with npm, then run `npm test` and `npm ci` validation.
 

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Deaddrop relay</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to status</a>
+    <header class="masthead">
+      <p class="wordmark">Deaddrop</p>
+      <p class="service-state"><span aria-hidden="true"></span>Onion relay available</p>
+    </header>
+
+    <main id="main">
+      <section class="intro" aria-labelledby="page-title">
+        <h1 id="page-title">A private route is waiting.</h1>
+        <p class="lede">
+          This address hosts a Deaddrop relay and its local application shell.
+          Nothing on this page contacts another service.
+        </p>
+      </section>
+
+      <section class="route" aria-labelledby="route-title">
+        <div class="route-heading">
+          <h2 id="route-title">Future relay route</h2>
+          <p>Displayed only. This shell does not connect.</p>
+        </div>
+        <div class="route-line" aria-hidden="true">
+          <span></span>
+          <i></i>
+          <span></span>
+        </div>
+        <code class="relay-address" data-shell="relay-url" tabindex="0">Preparing local route…</code>
+      </section>
+
+      <section class="bootstrap" aria-labelledby="bootstrap-title">
+        <h2 id="bootstrap-title">Recipient link</h2>
+        <p data-shell="bootstrap-state" role="status" aria-live="polite">
+          Checking this page fragment locally…
+        </p>
+      </section>
+
+      <section class="command" aria-labelledby="command-title">
+        <div>
+          <h2 id="command-title">Command-line handoff</h2>
+          <p>The future client will accept the same shared link.</p>
+        </div>
+        <code data-shell="cli-command" tabindex="0">Preparing instructions…</code>
+      </section>
+
+      <aside class="phase-note" aria-labelledby="phase-title">
+        <h2 id="phase-title">Messaging is not enabled yet</h2>
+        <p>
+          The relay address and landing shell are ready. Sending, receiving,
+          identity creation, and vaults arrive with the next client phase.
+        </p>
+      </aside>
+    </main>
+
+    <footer>
+      <p>No analytics. No remote assets. No clearnet fallback.</p>
+    </footer>
+    <noscript>This status page needs local JavaScript to inspect a shared link.</noscript>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

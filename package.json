@@ -3,7 +3,7 @@
   "private": true,
   "license": "Apache-2.0",
   "engines": { "node": ">=22.0.0" },
-  "workspaces": ["packages/*"],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "check:pins": "node scripts/validate-pins.mjs",
     "test": "npm run test --workspaces --if-present",
