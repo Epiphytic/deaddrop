@@ -44,19 +44,19 @@ The static shell must state that messaging is not enabled yet. It may recognize 
 - Modify: `crates/server/src/debug.rs`
 - Create: `crates/server/src/connection/tests.rs`
 
-- [ ] **Step 1: Write a failing in-memory WebSocket test**
+- [x] **Step 1: Write a failing in-memory WebSocket test**
 
 Use a source-unit test with `tokio::io::duplex` and `WebSocketStream::from_raw_socket` to prove an already-upgraded server-role stream receives `AUTH` first, accepts an exact NIP-42 relay URL, and completes a publish/query round trip through real SQLite. The test must not construct a `TcpStream`; do not widen the connection driver's production visibility solely for testing.
 
-- [ ] **Step 2: Split handshake from session driving**
+- [x] **Step 2: Split handshake from session driving**
 
 Keep the debug-only `accept_async_with_config(TcpStream, ...)` wrapper, then pass the resulting socket into a generic `serve_websocket<S>` where `S: AsyncRead + AsyncWrite + Unpin`; require `Send + 'static` only at the spawn/registrar boundary. Preserve frame/message caps, text-only handling, periodic live-output draining, idle and handshake deadlines, redacted diagnostics, and server-owned `SessionTask` handoff. An onion HTTP upgrade must use `from_raw_socket(Role::Server)` and must never perform a second WebSocket handshake.
 
-- [ ] **Step 3: Bound stalled output independently of shutdown**
+- [x] **Step 3: Bound stalled output independently of shutdown**
 
 Add a Tor-tolerant per-write deadline in addition to the shutdown race. Test a peer that stops reading and prove its generic driver terminates without impeding a second driver or global shutdown. Task 2 proves registrar permit release.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run `cargo test --locked -p deaddrop-server` so the new source-unit test and existing debug/acceptance suites all execute; do not rely on a name filter that can match zero tests.
 
