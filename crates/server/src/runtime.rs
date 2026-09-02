@@ -82,6 +82,11 @@ impl TaskSubmitter {
             error.0.await;
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn remaining_capacity(&self) -> usize {
+        self.0.capacity()
+    }
 }
 
 struct RegisteredConnection {
@@ -252,8 +257,36 @@ impl RelayRuntime {
     }
 
     #[cfg(test)]
-    fn trigger_shutdown(&self) {
+    pub(crate) fn trigger_shutdown(&self) {
         self.shutdown.trigger();
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn start_with_connection_capacity(
+        database_path: impl AsRef<Path>,
+        connection_capacity: usize,
+    ) -> Result<Self, Error> {
+        let config = RuntimeConfig {
+            connection_capacity,
+            ..RuntimeConfig::default()
+        };
+        Self::start_with_config(database_path, config).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn start_with_test_capacities(
+        database_path: impl AsRef<Path>,
+        connection_capacity: usize,
+        accepted_task_capacity: usize,
+        accepted_task_concurrency: usize,
+    ) -> Result<Self, Error> {
+        let config = RuntimeConfig {
+            connection_capacity,
+            accepted_task_capacity,
+            accepted_task_concurrency,
+            ..RuntimeConfig::default()
+        };
+        Self::start_with_config(database_path, config).await
     }
 
     pub(crate) async fn shutdown(mut self) -> Result<(), Error> {

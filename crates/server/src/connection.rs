@@ -111,10 +111,6 @@ async fn run_connection(
     drive_websocket(websocket, relay_url, hub, tasks, shutdown, WRITE_TIMEOUT).await
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the onion HTTP upgrade in Task 4")
-)]
 pub(crate) async fn serve_websocket<S>(
     stream: S,
     relay_url: RelayUrl,
@@ -128,10 +124,6 @@ where
     serve_websocket_with_write_timeout(stream, relay_url, hub, tasks, shutdown, WRITE_TIMEOUT).await
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the onion HTTP upgrade in Task 4")
-)]
 async fn serve_websocket_with_write_timeout<S>(
     stream: S,
     relay_url: RelayUrl,

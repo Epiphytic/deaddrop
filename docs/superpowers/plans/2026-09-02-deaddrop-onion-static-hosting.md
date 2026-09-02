@@ -141,23 +141,23 @@ Commit: `feat: add self-contained deaddrop landing shell`
 - Create: `crates/server/src/onion_http/tests.rs`
 - Modify: `crates/server/src/lib.rs`
 
-- [ ] **Step 1: Write failing route and header tests over `duplex`**
+- [x] **Step 1: Write failing route and header tests over `duplex`**
 
 In source-unit tests, serve the actual Hyper connection over an in-memory stream. Cover `GET|HEAD /`, `/app.js`, `/styles.css`, `GET /health`, `GET /relay` without upgrade (`426`), unknown paths (`404`), unsupported methods (`405`), query-string rejection, request bodies/transfer encoding rejection, and malformed/oversized/slow headers. Before route dispatch, require exactly one canonical onion `Host` on every request; reject missing/duplicate/malformed Host, absolute-form authorities, and any authority that conflicts with the canonical origin. Task 5 proves raw-stream admission against the supervisor introduced here.
 
-- [ ] **Step 2: Enforce the static security envelope on every response**
+- [x] **Step 2: Enforce the static security envelope on every application response**
 
-Embed a finite build-time asset manifest; never accept an operator web root. Apply `Cache-Control: no-store`, `Content-Security-Policy` with `connect-src 'none'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, COOP/COEP/CORP, restrictive `Permissions-Policy`, and `frame-ancestors 'none'` to success and error responses. Emit no `Date`, `Server`, HSTS, CORS, or framework header.
+Embed a finite build-time asset manifest; never accept an operator web root. Apply `Cache-Control: no-store`, `Content-Security-Policy` with `connect-src 'none'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, COOP/COEP/CORP, restrictive `Permissions-Policy`, and `frame-ancestors 'none'` to application success and error responses. Emit no `Date`, `Server`, HSTS, CORS, or framework header. Hyper owns malformed input rejected before it constructs a request; keep those parser responses bounded and bodyless and disable its automatic `Date` header.
 
-- [ ] **Step 3: Implement the exact `/relay` upgrade**
+- [x] **Step 3: Implement the exact `/relay` upgrade**
 
 Use Hyper HTTP/1 with upgrades, strict header/body/buffer/time limits, and one bounded transport-independent HTTP/upgrade supervisor. Configure `http1::Builder::timer(TokioTimer::new())` before `header_read_timeout`, disable automatic Date with `auto_date_header(false)`, and call `serve_connection(...).with_upgrades()`. Allow no body or exact `Content-Length: 0`; reject positive content length plus any `Transfer-Encoding` or `Expect` without draining. After global Host/request-target validation, apply WebSocket Origin policy: if `Origin` is present require exact `http://<onion>`, while allowing no `Origin` for CLI clients. Parse `Connection` and `Upgrade` as comma-separated case-insensitive tokens, require WebSocket version `13`, validate that `Sec-WebSocket-Key` decodes to exactly 16 bytes, and reject `null`/foreign origins plus unrequested extensions/subprotocols. Do not hand-write RFC6455 acceptance: validate and construct the `101` with tungstenite's server handshake primitives, call `hyper::upgrade::on(&mut request)`, await it in tracked work, wrap `hyper_util::rt::TokioIo::new(upgraded)` once with `WebSocketStream::from_raw_socket(Role::Server, ...)`, then enter the shared driver with the immutable server-derived `ws://<onion>/relay` URL. The supervisor owns the permit across both the Hyper request and upgraded WebSocket task rather than releasing it at `101`; saturated `try_submit` fails closed and drops the stream.
 
-- [ ] **Step 4: Prove full relay behavior through the HTTP seam**
+- [x] **Step 4: Prove full relay behavior through the HTTP seam**
 
 Over one in-memory upgraded route, verify challenge-first NIP-42, authenticated `REQ`/`EOSE`, successful publish, authorized live/history delivery, binary/oversize policy, upgrade admission during shutdown, and accepted publish completion after disconnect. Do not bypass the HTTP upgrade or store. Separately prove wrong Host/path/query/scheme fail at HTTP before a session exists, while valid upgrades with wrong NIP-42 relay-tag scheme/host/port/path/query/trailing-slash variants receive authentication rejection.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run `cargo test --locked -p deaddrop-server` and strict package Clippy so source-unit and integration coverage both execute.
 
