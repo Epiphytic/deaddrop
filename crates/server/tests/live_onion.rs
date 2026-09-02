@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
@@ -26,6 +26,9 @@ const CLIENT_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(300);
 const DESCRIPTOR_TIMEOUT: Duration = Duration::from_secs(300);
 const TRAFFIC_TIMEOUT: Duration = Duration::from_secs(90);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const UNAUTHORIZED_OBSERVATION_TIMEOUT: Duration = Duration::from_secs(2);
+const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(5);
+const SUBPROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -69,10 +72,12 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
 
         let mut publisher =
             authenticated_socket(&client, &startup.relay_url, &other_reader).await?;
-        publisher
-            .send_text(json!(["EVENT", event.clone()]).to_string())
-            .await
-            .context("publish private event over Tor")?;
+        send_text_bounded(
+            &mut publisher,
+            json!(["EVENT", event.clone()]).to_string(),
+            "private event publish",
+        )
+        .await?;
         let stored = recv_json(&mut publisher).await?;
         ensure!(
             stored[0] == "OK" && stored[1] == event.id.to_hex() && stored[2] == true,
@@ -101,10 +106,12 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
         let filter = inbox_filter(&recipient);
         let mut unauthorized =
             authenticated_socket(&client, &startup.relay_url, &other_reader).await?;
-        unauthorized
-            .send_text(json!(["REQ", "unauthorized", filter.clone()]).to_string())
-            .await
-            .context("send unauthorized private query")?;
+        send_text_bounded(
+            &mut unauthorized,
+            json!(["REQ", "unauthorized", filter.clone()]).to_string(),
+            "unauthorized private query",
+        )
+        .await?;
         let denied = recv_json(&mut unauthorized).await?;
         ensure!(
             denied[0] == "CLOSED"
@@ -114,13 +121,23 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
                     .is_some_and(|reason| reason.starts_with("restricted:")),
             "private history query was not denied to the wrong reader"
         );
-        close_socket(unauthorized).await?;
+        let unauthorized_still_open = observe_no_subscription_event(
+            &mut unauthorized,
+            "unauthorized",
+            UNAUTHORIZED_OBSERVATION_TIMEOUT,
+        )
+        .await?;
+        if unauthorized_still_open {
+            close_socket(unauthorized).await?;
+        }
 
         let mut authorized = authenticated_socket(&client, &startup.relay_url, &recipient).await?;
-        authorized
-            .send_text(json!(["REQ", "history", filter]).to_string())
-            .await
-            .context("send authorized private query")?;
+        send_text_bounded(
+            &mut authorized,
+            json!(["REQ", "history", filter]).to_string(),
+            "authorized private query",
+        )
+        .await?;
         let delivered = recv_json(&mut authorized).await?;
         ensure!(
             delivered[0] == "EVENT"
@@ -260,10 +277,12 @@ async fn authenticated_socket(
         .custom_created_at(Timestamp::from(now()))
         .sign_with_keys(account)
         .context("sign NIP-42 authentication event")?;
-    socket
-        .send_text(json!(["AUTH", auth]).to_string())
-        .await
-        .context("send NIP-42 authentication event")?;
+    send_text_bounded(
+        &mut socket,
+        json!(["AUTH", auth]).to_string(),
+        "NIP-42 authentication send",
+    )
+    .await?;
     let accepted = recv_json(&mut socket).await?;
     ensure!(
         accepted[0] == "OK" && accepted[2] == true,
@@ -283,6 +302,71 @@ async fn recv_json(socket: &mut TorWebSocket) -> Result<Value> {
     serde_json::from_str(&text).context("relay response was not valid JSON")
 }
 
+trait MessageReceiver {
+    async fn next_message(&mut self) -> Result<Option<WsMessage>>;
+}
+
+impl MessageReceiver for TorWebSocket {
+    async fn next_message(&mut self) -> Result<Option<WsMessage>> {
+        self.recv().await.map_err(Into::into)
+    }
+}
+
+async fn send_text_bounded(socket: &mut TorWebSocket, text: String, operation: &str) -> Result<()> {
+    tokio::time::timeout(RESPONSE_TIMEOUT, socket.send_text(text))
+        .await
+        .with_context(|| format!("{operation} exceeded its deadline"))?
+        .map_err(Into::into)
+}
+
+async fn observe_no_subscription_event(
+    receiver: &mut impl MessageReceiver,
+    subscription_id: &str,
+    interval: Duration,
+) -> Result<bool> {
+    let deadline = tokio::time::Instant::now() + interval;
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(true);
+        }
+        let message = match tokio::time::timeout_at(deadline, receiver.next_message()).await {
+            Err(_) => return Ok(true),
+            Ok(result) => result?,
+        };
+        let Some(message) = message else {
+            return Ok(false);
+        };
+        match message {
+            WsMessage::Close(_) => return Ok(false),
+            WsMessage::Binary(_) => {
+                bail!("relay sent a binary frame during negative observation")
+            }
+            WsMessage::Text(text) => {
+                let message: Value = serde_json::from_str(&text)
+                    .context("relay sent invalid JSON during negative observation")?;
+                let fields = message
+                    .as_array()
+                    .context("relay sent a non-array message during negative observation")?;
+                let message_type = fields
+                    .first()
+                    .and_then(Value::as_str)
+                    .context("relay message type was missing during negative observation")?;
+                if message_type == "EVENT" {
+                    let delivered_subscription = fields
+                        .get(1)
+                        .and_then(Value::as_str)
+                        .context("relay EVENT omitted its subscription ID")?;
+                    ensure!(
+                        delivered_subscription != subscription_id,
+                        "relay leaked an unauthorized EVENT after closing the subscription"
+                    );
+                }
+            }
+            _ => bail!("relay sent an unsupported frame during negative observation"),
+        }
+    }
+}
+
 async fn close_socket(socket: TorWebSocket) -> Result<()> {
     tokio::time::timeout(RESPONSE_TIMEOUT, socket.close())
         .await
@@ -293,19 +377,88 @@ async fn close_socket(socket: TorWebSocket) -> Result<()> {
 fn assert_no_listening_sockets(relay: &mut ManagedChild) -> Result<()> {
     relay.assert_running()?;
     let pid = relay.child.id().to_string();
-    let tcp = Command::new("lsof")
-        .args(["-nP", "-a", "-p", &pid, "-iTCP", "-sTCP:LISTEN"])
-        .output()
-        .context("lsof is required for the live onion test")?;
-    require_no_lsof_rows(tcp, "TCP listener")?;
+    let mut tcp = Command::new("lsof");
+    tcp.args(["-nP", "-a", "-p", &pid, "-iTCP", "-sTCP:LISTEN"]);
+    let tcp = run_bounded_command(tcp, SUBPROCESS_TIMEOUT)
+        .context("TCP lsof inspection could not run")?;
+    ensure!(!tcp.timed_out, "TCP lsof inspection exceeded its deadline");
+    require_no_lsof_rows(tcp.output, "TCP listener")?;
 
     relay.assert_running()?;
-    let udp = Command::new("lsof")
-        .args(["-nP", "-a", "-p", &pid, "-iUDP"])
-        .output()
-        .context("lsof is required for the live onion test")?;
-    require_no_lsof_rows(udp, "UDP socket")?;
+    let mut udp = Command::new("lsof");
+    udp.args(["-nP", "-a", "-p", &pid, "-iUDP"]);
+    let udp = run_bounded_command(udp, SUBPROCESS_TIMEOUT)
+        .context("UDP lsof inspection could not run")?;
+    ensure!(!udp.timed_out, "UDP lsof inspection exceeded its deadline");
+    require_no_lsof_rows(udp.output, "UDP socket")?;
     relay.assert_running()
+}
+
+struct BoundedCommandOutput {
+    output: Output,
+    timed_out: bool,
+}
+
+fn run_bounded_command(mut command: Command, timeout: Duration) -> Result<BoundedCommandOutput> {
+    let mut stdout_file = tempfile::tempfile().context("create subprocess stdout capture")?;
+    let mut stderr_file = tempfile::tempfile().context("create subprocess stderr capture")?;
+    command.stdout(Stdio::from(
+        stdout_file
+            .try_clone()
+            .context("clone subprocess stdout capture")?,
+    ));
+    command.stderr(Stdio::from(
+        stderr_file
+            .try_clone()
+            .context("clone subprocess stderr capture")?,
+    ));
+    let mut child = command.spawn().context("spawn bounded subprocess")?;
+    let deadline = Instant::now() + timeout;
+
+    let (status, timed_out) = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break (status, false),
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(SUBPROCESS_POLL_INTERVAL.min(timeout));
+            }
+            Ok(None) => {
+                let kill_result = child.kill();
+                let wait_result = child.wait();
+                kill_result.context("kill subprocess after its deadline")?;
+                let status = wait_result.context("reap subprocess after its deadline")?;
+                break (status, true);
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error).context("poll bounded subprocess");
+            }
+        }
+    };
+
+    stdout_file
+        .seek(SeekFrom::Start(0))
+        .context("rewind subprocess stdout")?;
+    stderr_file
+        .seek(SeekFrom::Start(0))
+        .context("rewind subprocess stderr")?;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    stdout_file
+        .read_to_end(&mut stdout)
+        .context("read subprocess stdout")?;
+    stderr_file
+        .read_to_end(&mut stderr)
+        .context("read subprocess stderr")?;
+
+    Ok(BoundedCommandOutput {
+        output: Output {
+            status,
+            stdout,
+            stderr,
+        },
+        timed_out,
+    })
 }
 
 fn require_no_lsof_rows(output: Output, socket_kind: &str) -> Result<()> {
@@ -377,11 +530,18 @@ impl ManagedChild {
 
     fn stop_cleanly(&mut self) -> Result<()> {
         self.assert_running()?;
-        let status = Command::new("kill")
-            .args(["-INT", &self.child.id().to_string()])
-            .status()
-            .context("send SIGINT to relay")?;
-        ensure!(status.success(), "could not signal relay shutdown");
+        let mut signal = Command::new("kill");
+        signal.args(["-INT", &self.child.id().to_string()]);
+        let signal =
+            run_bounded_command(signal, SUBPROCESS_TIMEOUT).context("run relay SIGINT command")?;
+        ensure!(
+            !signal.timed_out,
+            "relay SIGINT command exceeded its deadline"
+        );
+        ensure!(
+            signal.output.status.success(),
+            "could not signal relay shutdown"
+        );
 
         let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
         loop {
@@ -407,5 +567,153 @@ impl Drop for ManagedChild {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::future::pending;
+
+    use super::*;
+
+    enum SyntheticReceive {
+        Message(WsMessage),
+        Error,
+        Stall,
+    }
+
+    struct SyntheticReceiver {
+        receives: VecDeque<SyntheticReceive>,
+    }
+
+    impl SyntheticReceiver {
+        fn new(receives: impl IntoIterator<Item = SyntheticReceive>) -> Self {
+            Self {
+                receives: receives.into_iter().collect(),
+            }
+        }
+    }
+
+    impl MessageReceiver for SyntheticReceiver {
+        async fn next_message(&mut self) -> Result<Option<WsMessage>> {
+            match self.receives.pop_front().unwrap_or(SyntheticReceive::Stall) {
+                SyntheticReceive::Message(message) => Ok(Some(message)),
+                SyntheticReceive::Error => bail!("synthetic receive failure"),
+                SyntheticReceive::Stall => pending().await,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn negative_observation_rejects_an_event_after_closed() {
+        let mut receiver = SyntheticReceiver::new([
+            SyntheticReceive::Message(WsMessage::Text(
+                json!(["NOTICE", "control traffic"]).to_string(),
+            )),
+            SyntheticReceive::Message(WsMessage::Text(
+                json!(["EVENT", "private-history", {}]).to_string(),
+            )),
+        ]);
+
+        let error =
+            observe_no_subscription_event(&mut receiver, "private-history", Duration::from_secs(1))
+                .await
+                .unwrap_err();
+
+        assert!(error.to_string().contains("unauthorized EVENT"));
+    }
+
+    #[tokio::test]
+    async fn negative_observation_handles_control_close_and_receive_errors() {
+        let mut closed = SyntheticReceiver::new([
+            SyntheticReceive::Message(WsMessage::Text(
+                json!(["NOTICE", "control traffic"]).to_string(),
+            )),
+            SyntheticReceive::Message(WsMessage::Close(None)),
+        ]);
+        assert!(
+            !observe_no_subscription_event(&mut closed, "private-history", Duration::from_secs(1))
+                .await
+                .unwrap()
+        );
+
+        let mut failed = SyntheticReceiver::new([SyntheticReceive::Error]);
+        let error =
+            observe_no_subscription_event(&mut failed, "private-history", Duration::from_secs(1))
+                .await
+                .unwrap_err();
+        assert!(error.to_string().contains("synthetic receive failure"));
+
+        let mut binary =
+            SyntheticReceiver::new([SyntheticReceive::Message(WsMessage::Binary(vec![0x01]))]);
+        let error =
+            observe_no_subscription_event(&mut binary, "private-history", Duration::from_secs(1))
+                .await
+                .unwrap_err();
+        assert!(error.to_string().contains("binary"));
+    }
+
+    #[tokio::test]
+    async fn negative_observation_waits_for_its_fixed_interval() {
+        let mut receiver = SyntheticReceiver::new([]);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(10),
+                observe_no_subscription_event(
+                    &mut receiver,
+                    "private-history",
+                    Duration::from_millis(100),
+                ),
+            )
+            .await
+            .is_err()
+        );
+
+        let mut receiver = SyntheticReceiver::new([]);
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            observe_no_subscription_event(
+                &mut receiver,
+                "private-history",
+                Duration::from_millis(20),
+            ),
+        )
+        .await
+        .expect("negative observation ignored its deadline")
+        .unwrap();
+    }
+
+    #[test]
+    fn bounded_subprocess_preserves_status_stdout_and_stderr() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'bounded stdout'; printf 'bounded stderr' >&2; exit 7",
+        ]);
+
+        let result = run_bounded_command(command, Duration::from_secs(1)).unwrap();
+
+        assert!(!result.timed_out);
+        assert_eq!(result.output.status.code(), Some(7));
+        assert_eq!(result.output.stdout, b"bounded stdout");
+        assert_eq!(result.output.stderr, b"bounded stderr");
+    }
+
+    #[test]
+    fn bounded_subprocess_kills_and_reaps_a_stalled_child() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'started'; printf 'stalled' >&2; exec sleep 30",
+        ]);
+        let started = Instant::now();
+
+        let result = run_bounded_command(command, Duration::from_millis(50)).unwrap();
+
+        assert!(result.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(result.output.stdout, b"started");
+        assert_eq!(result.output.stderr, b"stalled");
     }
 }

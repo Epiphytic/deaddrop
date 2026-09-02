@@ -73,6 +73,7 @@ jobs:
             artifacts/feasibility/live-probe-logs/
 
   live-tor:
+    needs: deterministic
     if: github.event_name == 'workflow_dispatch' && inputs.run_live
     runs-on: ubuntu-latest
     timeout-minutes: 45
