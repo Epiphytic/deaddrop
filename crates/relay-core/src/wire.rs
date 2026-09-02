@@ -1,4 +1,5 @@
 use core::fmt;
+use std::collections::BTreeSet;
 
 use nostr::{Event, Filter, SubscriptionId};
 use serde::{
@@ -55,6 +56,8 @@ pub enum WireError {
     UnknownFilterField { index: usize, field: String },
     #[error("filter {index} field {field} has an invalid JSON type")]
     InvalidFilterField { index: usize, field: String },
+    #[error("filter {index} field {field} contains a duplicate value")]
+    DuplicateFilterValue { index: usize, field: String },
     #[error("filter {index} is invalid: {source}")]
     InvalidFilter {
         index: usize,
@@ -203,6 +206,21 @@ fn validate_filter_fields(object: &Map<String, Value>, index: usize) -> Result<(
                 index,
                 field: field.clone(),
             });
+        }
+        if field.starts_with('#') {
+            let mut seen = BTreeSet::new();
+            for item in value.as_array().expect("generic tag array checked above") {
+                let item = item.as_str().ok_or_else(|| WireError::InvalidFilterField {
+                    index,
+                    field: field.clone(),
+                })?;
+                if !seen.insert(item) {
+                    return Err(WireError::DuplicateFilterValue {
+                        index,
+                        field: field.clone(),
+                    });
+                }
+            }
         }
     }
     Ok(())

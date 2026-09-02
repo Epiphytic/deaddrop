@@ -127,19 +127,19 @@ pub fn authorize_filters(
 ) -> Result<Vec<AuthorizedQuery>, PolicyError>;
 ```
 
-- [ ] **Step 1: Write table and property tests**
+- [x] **Step 1: Write table and property tests**
 
 Cover public `{0, 30443}` queries, exact authenticated `1059/#p`, exact lowercase 64-hex `445/#h`, optional IDs/authors/time/limit constraints, and rejection of mixed public/private kinds, missing/multiple `p` or `h` values, unknown tags, `search`, prefixes, unsupported kinds, and any unauthorized member of an OR-filter list. Property tests must generate malformed private filters and prove none become an authorized scope.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `cargo test -p deaddrop-protocol-core --test filter_policy`
 
-- [ ] **Step 3: Implement closed typed queries**
+- [x] **Step 3: Implement closed typed queries**
 
 Parse exact route tags, retain only safe secondary constraints, and reject ambiguous filters instead of broadening them. Keep constructors and fields private; expose read-only accessors for storage so another crate cannot forge an authorization result.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `cargo test -p deaddrop-protocol-core`
 

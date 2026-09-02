@@ -130,6 +130,19 @@ fn rejects_null_filter_constraints() {
 }
 
 #[test]
+fn rejects_duplicate_private_route_values_before_filter_normalization() {
+    for raw in [
+        r##"["REQ","sub",{"kinds":[1059],"#p":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}]"##,
+        r##"["REQ","sub",{"kinds":[445],"#h":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]}]"##,
+    ] {
+        assert!(matches!(
+            parse_client_message(raw.as_bytes(), &limits()),
+            Err(WireError::DuplicateFilterValue { index: 0, .. })
+        ));
+    }
+}
+
+#[test]
 fn rejects_unknown_message_names() {
     assert!(parse_client_message(br#"["COUNT","sub",{}]"#, &limits()).is_err());
 }

@@ -7,3 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 nostr.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1.9"
