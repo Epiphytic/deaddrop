@@ -12,6 +12,7 @@ use crate::{
     connection::SystemClock,
     maintenance::run_maintenance,
     shutdown::{ShutdownSignal, ShutdownTrigger, shutdown_channel},
+    state::{StateDirectory, StateLockLease},
 };
 
 const SQLITE_QUEUE_CAPACITY: usize = 64;
@@ -151,17 +152,56 @@ pub(crate) struct RelayRuntime {
     completion: Option<JoinHandle<Result<(), Error>>>,
 }
 
-struct CompletionGuard(ShutdownTrigger);
+struct CompletionGuard {
+    completion: ShutdownTrigger,
+    state_lock: Option<StateLockLease>,
+}
 
 impl Drop for CompletionGuard {
     fn drop(&mut self) {
-        self.0.trigger();
+        drop(self.state_lock.take());
+        self.completion.trigger();
     }
 }
 
 impl RelayRuntime {
     pub(crate) async fn start(database_path: impl AsRef<Path>) -> Result<Self, Error> {
         Self::start_with_config(database_path, RuntimeConfig::default()).await
+    }
+
+    pub(crate) async fn start_with_state(state: &StateDirectory) -> Result<Self, Error> {
+        Self::start_state_runtime(state, std::future::ready(())).await
+    }
+
+    #[cfg(test)]
+    async fn start_with_state_after<F>(
+        state: &StateDirectory,
+        before_open: F,
+    ) -> Result<Self, Error>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Self::start_state_runtime(state, before_open).await
+    }
+
+    async fn start_state_runtime<F>(state: &StateDirectory, before_open: F) -> Result<Self, Error>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let database_path = state.database_path();
+        let state_lock = state.lock_lease();
+        tokio::spawn(async move {
+            before_open.await;
+            Self::start_with_config_after_open_and_lock(
+                database_path,
+                RuntimeConfig::default(),
+                |_| Ok(()),
+                Some(state_lock),
+            )
+            .await
+        })
+        .await
+        .map_err(Error::RuntimeJoin)?
     }
 
     #[cfg(test)]
@@ -203,6 +243,18 @@ impl RelayRuntime {
     where
         F: FnOnce(&SqliteStore) -> Result<(), StoreError>,
     {
+        Self::start_with_config_after_open_and_lock(database_path, config, after_open, None).await
+    }
+
+    async fn start_with_config_after_open_and_lock<F>(
+        database_path: impl AsRef<Path>,
+        config: RuntimeConfig,
+        after_open: F,
+        state_lock: Option<StateLockLease>,
+    ) -> Result<Self, Error>
+    where
+        F: FnOnce(&SqliteStore) -> Result<(), StoreError>,
+    {
         assert!(config.accepted_task_capacity > 0);
         assert!(config.accepted_task_concurrency > 0);
         assert!(config.connection_capacity > 0);
@@ -225,7 +277,10 @@ impl RelayRuntime {
         let (completion_trigger, completion_signal) = shutdown_channel();
         let runtime_shutdown = shutdown.clone();
         let completion = tokio::spawn(async move {
-            let _completion = CompletionGuard(completion_trigger);
+            let _completion = CompletionGuard {
+                completion: completion_trigger,
+                state_lock,
+            };
             run_runtime(
                 store,
                 task_receiver,
@@ -515,8 +570,10 @@ mod tests {
     use tokio::sync::{Notify, Semaphore, mpsc, oneshot};
 
     use super::*;
+    use crate::state::{StateDirectory, StateError};
 
     const NOW: u64 = 1_700_000_000;
+    const ONION_ADDRESS: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion";
 
     #[derive(Clone, Copy)]
     struct FixedClock;
@@ -700,6 +757,80 @@ mod tests {
         })
         .await
         .expect("Drop did not trigger background runtime cleanup");
+    }
+
+    #[tokio::test]
+    async fn dropped_runtime_retains_state_lock_until_admitted_work_drains() {
+        let temp = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let data_dir = temp.path().join("state");
+        let mut state = StateDirectory::acquire(&data_dir).unwrap();
+        state.validate_or_record_identity(ONION_ADDRESS).unwrap();
+        let runtime = RelayRuntime::start_with_state(&state).await.unwrap();
+        let handle = runtime.handle();
+        let mut completion = runtime.completion_signal();
+        let (entered_sender, entered_receiver) = oneshot::channel();
+        let release = Arc::new(Semaphore::new(0));
+        let task_release = Arc::clone(&release);
+        handle
+            .try_register_connection(async move {
+                entered_sender.send(()).unwrap();
+                let permit = task_release.acquire().await.unwrap();
+                permit.forget();
+            })
+            .unwrap();
+        entered_receiver.await.unwrap();
+
+        drop(state);
+        drop(runtime);
+        assert!(matches!(
+            StateDirectory::acquire(&data_dir),
+            Err(StateError::AlreadyRunning)
+        ));
+
+        release.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), completion.cancelled())
+            .await
+            .expect("background runtime cleanup did not finish");
+        StateDirectory::acquire(&data_dir)
+            .expect("runtime completion must release the state lock last");
+    }
+
+    #[tokio::test]
+    async fn cancelled_state_bound_startup_retains_lock_until_detached_cleanup() {
+        let temp = TempDir::new_in(std::env::current_dir().unwrap()).unwrap();
+        let data_dir = temp.path().join("state");
+        let mut state = StateDirectory::acquire(&data_dir).unwrap();
+        state.validate_or_record_identity(ONION_ADDRESS).unwrap();
+        let (entered_sender, entered_receiver) = oneshot::channel();
+        let (release_sender, release_receiver) = oneshot::channel();
+        let mut startup = Box::pin(RelayRuntime::start_with_state_after(&state, async move {
+            entered_sender.send(()).unwrap();
+            release_receiver.await.unwrap();
+        }));
+        tokio::select! {
+            _ = &mut startup => panic!("state-bound startup completed before its gate"),
+            result = entered_receiver => result.unwrap(),
+        }
+
+        drop(startup);
+        drop(state);
+        assert!(matches!(
+            StateDirectory::acquire(&data_dir),
+            Err(StateError::AlreadyRunning)
+        ));
+
+        release_sender.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match StateDirectory::acquire(&data_dir) {
+                    Ok(state) => break state,
+                    Err(StateError::AlreadyRunning) => tokio::task::yield_now().await,
+                    Err(error) => panic!("unexpected state reacquisition error: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("cancelled startup did not finish detached cleanup");
     }
 
     #[tokio::test]

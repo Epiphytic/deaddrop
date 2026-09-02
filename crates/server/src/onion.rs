@@ -1,6 +1,6 @@
-use std::future::Future;
+use std::{future::Future, io};
 
-use hypertor::{OnionService, VanguardMode};
+use hypertor::{OnionService, OnionStream, VanguardMode};
 use serde::Serialize;
 use thiserror::Error as ThisError;
 
@@ -49,7 +49,6 @@ pub enum Error {
 pub struct OnionRelay {
     service: OnionService,
     runtime: RelayRuntime,
-    state: StateDirectory,
     host: OnionHttpHost,
     startup: StartupRecord,
 }
@@ -60,7 +59,7 @@ impl OnionRelay {
         let builder = OnionService::builder()
             .nickname(config.nickname())
             .map_err(Error::OnionLaunch)?;
-        let runtime = RelayRuntime::start(state.database_path())
+        let runtime = RelayRuntime::start_with_state(&state)
             .await
             .map_err(|_| Error::RuntimeStart)?;
 
@@ -94,10 +93,10 @@ impl OnionRelay {
         let startup = StartupRecord::from_onion_address(&onion_address);
         let host = OnionHttpHost::new(onion_address, runtime.handle());
         let (runtime, service) = ensure_runtime_alive(runtime, service).await?;
+        drop(state);
         Ok(Self {
             service,
             runtime,
-            state,
             host,
             startup,
         })
@@ -111,11 +110,9 @@ impl OnionRelay {
         let Self {
             service,
             runtime,
-            state,
             host: _,
             startup: _,
         } = self;
-        let _state = state;
         shutdown_in_order(service, || runtime.shutdown())
             .await
             .map_err(|_| Error::RuntimeShutdown)
@@ -125,35 +122,15 @@ impl OnionRelay {
         let Self {
             mut service,
             runtime,
-            state,
             host,
             startup: _,
         } = self;
-        let _state = state;
-        let mut runtime_done = runtime.completion_signal();
-        let outcome = loop {
-            tokio::select! {
-                signal = tokio::signal::ctrl_c() => {
-                    break signal.map_err(Error::Signal);
-                }
-                _ = runtime_done.cancelled() => break Err(Error::RuntimeStopped),
-                stream = service.accept() => match stream {
-                    Some(stream) => match host.try_serve(stream) {
-                        Ok(()) => {}
-                        Err(ConnectionAdmissionError::AtCapacity) => {
-                            tracing::warn!(
-                                event = "onion_connection_rejected",
-                                reason = "connection-capacity"
-                            );
-                        }
-                        Err(ConnectionAdmissionError::ShuttingDown) => {
-                            break Err(Error::RuntimeStopped);
-                        }
-                    },
-                    None => break Err(Error::AcceptClosed),
-                }
-            }
-        };
+        let runtime_done = runtime.completion_signal();
+        let shutdown_signal = tokio::signal::ctrl_c();
+        let outcome = run_accept_loop(&mut service, runtime_done, shutdown_signal, |stream| {
+            host.try_serve(stream)
+        })
+        .await;
 
         let cleanup = shutdown_in_order(service, || runtime.shutdown()).await;
         match (outcome, cleanup) {
@@ -166,6 +143,55 @@ impl OnionRelay {
                     reason = "relay-runtime-shutdown"
                 );
                 Err(primary)
+            }
+        }
+    }
+}
+
+trait StreamAcceptor {
+    type Stream;
+
+    fn accept(&mut self) -> impl Future<Output = Option<Self::Stream>>;
+}
+
+impl StreamAcceptor for OnionService {
+    type Stream = OnionStream;
+
+    fn accept(&mut self) -> impl Future<Output = Option<Self::Stream>> {
+        OnionService::accept(self)
+    }
+}
+
+async fn run_accept_loop<A, S, F>(
+    acceptor: &mut A,
+    mut runtime_done: crate::shutdown::ShutdownSignal,
+    shutdown_signal: S,
+    mut admit: F,
+) -> Result<(), Error>
+where
+    A: StreamAcceptor,
+    S: Future<Output = Result<(), io::Error>>,
+    F: FnMut(A::Stream) -> Result<(), ConnectionAdmissionError>,
+{
+    tokio::pin!(shutdown_signal);
+    loop {
+        tokio::select! {
+            signal = &mut shutdown_signal => return signal.map_err(Error::Signal),
+            _ = runtime_done.cancelled() => return Err(Error::RuntimeStopped),
+            stream = acceptor.accept() => match stream {
+                Some(stream) => match admit(stream) {
+                    Ok(()) => {}
+                    Err(ConnectionAdmissionError::AtCapacity) => {
+                        tracing::warn!(
+                            event = "onion_connection_rejected",
+                            reason = "connection-capacity"
+                        );
+                    }
+                    Err(ConnectionAdmissionError::ShuttingDown) => {
+                        return Err(Error::RuntimeStopped);
+                    }
+                },
+                None => return Err(Error::AcceptClosed),
             }
         }
     }
@@ -235,15 +261,29 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::{
+        collections::VecDeque,
+        future::{Future, poll_fn},
+        io,
+        pin::Pin,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::{Context, Poll},
+    };
 
     use deaddrop_relay_sqlite::{Error as StoreError, SqliteStore};
     use tempfile::TempDir;
 
     use super::{
-        Error, LaunchFailure, ensure_runtime_alive, launch_or_shutdown, shutdown_in_order,
+        Error, LaunchFailure, StreamAcceptor, ensure_runtime_alive, launch_or_shutdown,
+        run_accept_loop, shutdown_in_order,
     };
-    use crate::runtime::RelayRuntime;
+    use crate::{
+        runtime::{ConnectionAdmissionError, RelayRuntime},
+        shutdown::shutdown_channel,
+    };
 
     struct DropRecorder(Arc<Mutex<Vec<&'static str>>>);
 
@@ -251,6 +291,71 @@ mod tests {
         fn drop(&mut self) {
             self.0.lock().unwrap().push("service-dropped");
         }
+    }
+
+    struct ReadyAcceptor(VecDeque<u8>);
+
+    impl StreamAcceptor for ReadyAcceptor {
+        type Stream = u8;
+
+        fn accept(&mut self) -> impl Future<Output = Option<Self::Stream>> {
+            let mut stream = self.0.pop_front();
+            poll_fn(move |_| match stream.take() {
+                Some(stream) => Poll::Ready(Some(stream)),
+                None => Poll::Pending,
+            })
+        }
+    }
+
+    struct StatefulSignal {
+        polls: Arc<AtomicUsize>,
+        drops: Arc<AtomicUsize>,
+        ready_after: usize,
+    }
+
+    impl Future for StatefulSignal {
+        type Output = Result<(), io::Error>;
+
+        fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+            let polls = self.polls.fetch_add(1, Ordering::AcqRel) + 1;
+            if polls >= self.ready_after {
+                Poll::Ready(Ok(()))
+            } else {
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
+    impl Drop for StatefulSignal {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    #[tokio::test]
+    async fn ready_admissions_reuse_one_live_shutdown_signal() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let drops = Arc::new(AtomicUsize::new(0));
+        let signal = StatefulSignal {
+            polls: Arc::clone(&polls),
+            drops: Arc::clone(&drops),
+            ready_after: 3,
+        };
+        let mut acceptor = ReadyAcceptor(VecDeque::from([1, 2]));
+        let (_runtime_trigger, runtime_done) = shutdown_channel();
+        let mut admitted = Vec::new();
+
+        let result = run_accept_loop(&mut acceptor, runtime_done, signal, |stream| {
+            admitted.push(stream);
+            Ok::<_, ConnectionAdmissionError>(())
+        })
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(admitted, vec![1, 2]);
+        assert_eq!(polls.load(Ordering::Acquire), 3);
+        assert_eq!(drops.load(Ordering::Acquire), 1);
     }
 
     #[tokio::test]

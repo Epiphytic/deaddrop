@@ -2,6 +2,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use fs2::FileExt;
@@ -53,12 +54,18 @@ struct IdentityManifest {
 
 /// Exclusive owner of one relay data directory and its persisted identity.
 ///
-/// The lock file remains open and locked until this value is dropped.
+/// The lock file remains open and locked until this value and every runtime
+/// lease derived from it are dropped.
 pub struct StateDirectory {
     data_dir: PathBuf,
     identity_state: IdentityState,
     manifest_address: Option<String>,
-    _lock: File,
+    lock: StateLockLease,
+}
+
+#[derive(Clone)]
+pub(crate) struct StateLockLease {
+    _lock: Arc<File>,
 }
 
 impl StateDirectory {
@@ -88,7 +95,9 @@ impl StateDirectory {
             data_dir: data_dir.to_owned(),
             identity_state,
             manifest_address,
-            _lock: lock,
+            lock: StateLockLease {
+                _lock: Arc::new(lock),
+            },
         })
     }
 
@@ -102,6 +111,10 @@ impl StateDirectory {
 
     pub fn database_path(&self) -> PathBuf {
         self.data_dir.join("relay.sqlite3")
+    }
+
+    pub(crate) fn lock_lease(&self) -> StateLockLease {
+        self.lock.clone()
     }
 
     pub fn validate_or_record_identity(&mut self, onion_address: &str) -> Result<(), StateError> {
