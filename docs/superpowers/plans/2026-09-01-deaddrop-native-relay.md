@@ -72,21 +72,21 @@ pub fn parse_client_message(raw: &[u8], limits: &WireLimits)
     -> Result<StrictClientMessage, WireError>;
 ```
 
-- [ ] **Step 1: Write failing wire tests**
+- [x] **Step 1: Write failing wire tests**
 
 Test valid `EVENT`, `REQ`, `CLOSE`, and `AUTH` messages plus rejection of non-UTF-8, oversized raw frames, unknown message names, wrong/excess array elements, malformed event/filter objects, empty or oversized subscription IDs, empty/excess filter lists, and unknown top-level filter fields.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `cargo test -p deaddrop-relay-core --test wire`
 
 Expected: FAIL because the crates and parser do not exist.
 
-- [ ] **Step 3: Implement the minimum strict parser**
+- [x] **Step 3: Implement the minimum strict parser**
 
 Validate raw JSON shape and byte limits before converting with `nostr` types. Do not rely on `ClientMessage::from_json` alone because the pinned parser accepts trailing array elements and permissive filters.
 
-- [ ] **Step 4: Verify native and WASM boundaries**
+- [x] **Step 4: Verify native and WASM boundaries**
 
 Run:
 
@@ -98,7 +98,7 @@ cargo build -p deaddrop-relay-core --target wasm32-unknown-unknown
 
 Expected: PASS without Tokio, Hyper, Hypertor, or SQLite entering either core dependency graph.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Cargo.toml Cargo.lock crates/protocol-core crates/relay-core
