@@ -9,7 +9,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-base64 = "0.22"
+base64.workspace = true
 cgka-engine = { git = "https://github.com/Epiphytic/mdk.git", rev = "4981e591bd9399fdad6d5bf62ce6eafa70da7d0b" }
 cgka-traits = { git = "https://github.com/Epiphytic/mdk.git", rev = "4981e591bd9399fdad6d5bf62ce6eafa70da7d0b" }
 hex = "0.4"

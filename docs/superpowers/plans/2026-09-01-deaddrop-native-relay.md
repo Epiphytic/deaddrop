@@ -177,21 +177,21 @@ pub fn validate_write(
 ) -> Result<ValidatedEvent, PolicyError>;
 ```
 
-- [ ] **Step 1: Write failing real-signature tests**
+- [x] **Step 1: Write failing real-signature tests**
 
 Use distinct authenticated, recipient, and disposable keys. Require valid ID/signature; bind kind `0` and `30443` to an authenticated author; permit valid ephemeral outer authors for `1059` and `445`; require exactly one valid `d`, `p`, or `h` route as appropriate; reject unknown kinds, malformed/duplicate routes, expired-on-arrival events, future-invalid retention, and oversized content.
 
 Cross-test `1059`/`445` route acceptance against pinned `NostrTransportEvent` behavior so relay policy cannot silently diverge from Marmot.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `cargo test -p deaddrop-protocol-core --test event_policy`
 
-- [ ] **Step 3: Implement policy**
+- [x] **Step 3: Implement policy**
 
 Use `Event::verify()`. Default encrypted retention is seven days from trusted `received_at`; requested NIP-40 expiration may shorten it; the server caps storage at 30 days. Do not apply ordinary freshness windows to NIP-59 gift-wrap `created_at`. Seal `ValidatedEvent` construction inside policy code so persistence cannot accept a caller-fabricated validation proof.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `cargo test -p deaddrop-protocol-core`
 

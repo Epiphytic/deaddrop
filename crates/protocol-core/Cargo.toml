@@ -6,8 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+base64.workspace = true
 nostr.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 proptest = "1.9"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+transport-nostr-peeler = { git = "https://github.com/Epiphytic/mdk.git", rev = "4981e591bd9399fdad6d5bf62ce6eafa70da7d0b" }
