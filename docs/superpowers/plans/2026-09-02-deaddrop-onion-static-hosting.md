@@ -214,27 +214,29 @@ Commit: `feat: host deaddrop as an embedded arti onion service`
 - Modify: `.github/workflows/feasibility.yml`
 - Modify: `README.md`
 
-- [ ] **Step 1: Add deterministic no-listener/source guards**
+- [x] **Step 1: Add deterministic no-listener/source guards**
 
 Keep the debug audit at exactly one explicit loopback listener. Assert that `TcpListener` appears only in the debug transport and that `relay` accepts no networking flag other than its data directory. Do not infer success merely because a process failed before publication.
 
-- [ ] **Step 2: Build the gated live Tor acceptance test**
+- [x] **Step 2: Build the gated live Tor acceptance test**
 
 Add a dev-only hypertor dependency with `client`/`ws` features; it must not enter the release graph. With `DEADDROP_LIVE_TOR=1`, start the real `deaddrop relay`, require the process to stay alive, and wait for its startup record with a fixed deadline. Inspect that exact PID before and during traffic: run `lsof -nP -a -p PID -iTCP -sTCP:LISTEN` and require no rows, then `lsof -nP -a -p PID -iUDP` and require no rows because UDP has no `LISTEN` state. Outbound Arti TCP connections are allowed. Through the dev-only embedded `hypertor::TorClient`, fetch `/`, `/app.js`, and `/health`; through dev-only `TorWebSocket`, perform AUTH, publish, and a positive authorized query. No SOCKS proxy is permitted.
 
 - [ ] **Step 3: Prove identity and data persistence across restart**
 
+Implemented in the gated real-Tor test; execution remains pending because `DEADDROP_LIVE_TOR=1` was not explicitly enabled in the verification environment.
+
 Restart against the same private data directory and assert the onion/relay URLs are identical and the previously stored event remains available only to its authorized reader. Bound SIGINT shutdown and redact live evidence.
 
-- [ ] **Step 4: Integrate deterministic and live CI**
+- [x] **Step 4: Integrate deterministic and live CI**
 
 Run all offline shell, Rust, listener, source-policy, and WASM regression checks in the deterministic job. Add the live onion HTTP/WebSocket proof only to the opt-in live-Tor job and record separate sanitized evidence for HTTP reachability and authenticated WebSocket success.
 
-- [ ] **Step 5: Document operation and phase boundary**
+- [x] **Step 5: Document operation and phase boundary**
 
 Document `deaddrop relay --data-dir`, exclusive-directory operation, persistent identity/manifest backup implications, fail-closed identity loss, startup JSON, virtual routes, zero-listener design, and safe shutdown. State clearly that changing identity currently requires a deliberate new data directory and invalidates old links; the hosted shell is inert until the next client/WASM/vault plan, and there is no browser clearnet fallback.
 
-- [ ] **Step 6: Run full verification and request review**
+- [x] **Step 6: Run full deterministic verification and request review**
 
 ```bash
 cargo fmt --all -- --check
