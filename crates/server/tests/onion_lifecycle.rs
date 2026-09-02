@@ -157,13 +157,51 @@ fn malformed_or_invalid_manifest_fails_closed() {
         let data_dir = temp.path().join("state");
         fs::create_dir(&data_dir).unwrap();
         set_private_directory(&data_dir);
-        fs::write(data_dir.join("identity.json"), contents).unwrap();
+        let manifest = data_dir.join("identity.json");
+        fs::write(&manifest, contents).unwrap();
+        set_private_file(&manifest);
 
         assert!(matches!(
             StateDirectory::acquire(&data_dir),
             Err(StateError::InvalidManifest)
         ));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_rejects_a_symlinked_tor_state_before_launch() {
+    use std::os::unix::fs::symlink;
+
+    let temp = private_temp();
+    let data_dir = temp.path().join("state");
+    persist_manifest(&data_dir);
+    let target = temp.path().join("external-tor");
+    fs::create_dir(&target).unwrap();
+    symlink(&target, data_dir.join("tor")).unwrap();
+
+    assert!(matches!(
+        StateDirectory::acquire(&data_dir),
+        Err(StateError::Symlink)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_rejects_a_symlinked_relay_database_before_open() {
+    use std::os::unix::fs::symlink;
+
+    let temp = private_temp();
+    let data_dir = temp.path().join("state");
+    persist_manifest(&data_dir);
+    let target = temp.path().join("external.sqlite3");
+    fs::write(&target, b"external database").unwrap();
+    symlink(&target, data_dir.join("relay.sqlite3")).unwrap();
+
+    assert!(matches!(
+        StateDirectory::acquire(&data_dir),
+        Err(StateError::Symlink)
+    ));
 }
 
 #[test]
@@ -239,4 +277,17 @@ fn set_private_directory(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
+}
+
+fn set_private_file(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+
+fn persist_manifest(data_dir: &std::path::Path) {
+    let mut state = StateDirectory::acquire(data_dir).unwrap();
+    state.validate_or_record_identity(ADDRESS_A).unwrap();
 }

@@ -80,6 +80,8 @@ impl StateDirectory {
             }
         })?;
         restrict_file_to_owner(&lock)?;
+        inspect_existing_components(&data_dir.join("tor"))?;
+        inspect_existing_components(&data_dir.join("relay.sqlite3"))?;
 
         let (identity_state, manifest_address) = classify_identity(data_dir)?;
         Ok(Self {
@@ -240,10 +242,8 @@ fn classify_identity(path: &Path) -> Result<(IdentityState, Option<String>), Sta
             Ok((IdentityState::Resume, Some(manifest.onion_address)))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let has_evidence = fs::read_dir(path)
-                .map_err(StateError::Io)?
-                .filter_map(Result::ok)
-                .any(|entry| entry.file_name() != LOCK_FILE);
+            let entries = fs::read_dir(path).map_err(StateError::Io)?;
+            let has_evidence = has_initialization_evidence(entries)?;
             if has_evidence {
                 Err(StateError::IncompleteIdentity)
             } else {
@@ -252,6 +252,17 @@ fn classify_identity(path: &Path) -> Result<(IdentityState, Option<String>), Sta
         }
         Err(error) => Err(StateError::Io(error)),
     }
+}
+
+fn has_initialization_evidence(
+    entries: impl IntoIterator<Item = io::Result<fs::DirEntry>>,
+) -> Result<bool, StateError> {
+    for entry in entries {
+        if entry.map_err(StateError::Io)?.file_name() != LOCK_FILE {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn valid_onion_address(address: &str) -> bool {
@@ -305,4 +316,26 @@ fn sync_directory(path: &Path) -> Result<(), StateError> {
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), StateError> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, io};
+
+    use super::{StateError, has_initialization_evidence};
+
+    #[test]
+    fn directory_entry_error_is_not_discarded_as_empty_state() {
+        let entries = std::iter::once(Err::<fs::DirEntry, _>(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "injected directory entry failure",
+        )));
+
+        let result = has_initialization_evidence(entries);
+
+        assert!(matches!(
+            result,
+            Err(StateError::Io(error)) if error.kind() == io::ErrorKind::PermissionDenied
+        ));
+    }
 }

@@ -71,9 +71,11 @@ impl OnionRelay {
             .max_streams_per_circuit(8)
             .rate_limit_at_intro(4, 8)
             .launch();
-        let (runtime, service) = launch_or_shutdown(runtime, launch)
-            .await
-            .map_err(Error::OnionLaunch)?;
+        let (runtime, service) = match launch_or_shutdown(runtime, launch).await {
+            Ok(launched) => launched,
+            Err(LaunchFailure::Launch(error)) => return Err(Error::OnionLaunch(error)),
+            Err(LaunchFailure::RuntimeStopped) => return Err(Error::RuntimeStopped),
+        };
 
         let onion_address = service.onion_address().to_owned();
         if let Err(primary) = state.validate_or_record_identity(&onion_address) {
@@ -91,6 +93,7 @@ impl OnionRelay {
 
         let startup = StartupRecord::from_onion_address(&onion_address);
         let host = OnionHttpHost::new(onion_address, runtime.handle());
+        let (runtime, service) = ensure_runtime_alive(runtime, service).await?;
         Ok(Self {
             service,
             runtime,
@@ -168,24 +171,56 @@ impl OnionRelay {
     }
 }
 
+enum LaunchFailure<E> {
+    Launch(E),
+    RuntimeStopped,
+}
+
 async fn launch_or_shutdown<T, E, F>(
     runtime: RelayRuntime,
     launch: F,
-) -> Result<(RelayRuntime, T), E>
+) -> Result<(RelayRuntime, T), LaunchFailure<E>>
 where
     F: Future<Output = Result<T, E>>,
 {
-    match launch.await {
-        Ok(service) => Ok((runtime, service)),
-        Err(primary) => {
+    let mut runtime_done = runtime.completion_signal();
+    tokio::pin!(launch);
+    let launch_result = tokio::select! {
+        biased;
+        result = &mut launch => Some(result),
+        _ = runtime_done.cancelled() => None,
+    };
+    match launch_result {
+        Some(Ok(service)) if runtime_done.is_triggered() => {
+            let _ = shutdown_in_order(service, || runtime.shutdown()).await;
+            Err(LaunchFailure::RuntimeStopped)
+        }
+        Some(Ok(service)) => Ok((runtime, service)),
+        Some(Err(primary)) => {
             if runtime.shutdown().await.is_err() {
                 tracing::warn!(
                     event = "onion_startup_cleanup_failed",
                     reason = "relay-runtime-shutdown"
                 );
             }
-            Err(primary)
+            Err(LaunchFailure::Launch(primary))
         }
+        None => {
+            let _ = runtime.shutdown().await;
+            Err(LaunchFailure::RuntimeStopped)
+        }
+    }
+}
+
+async fn ensure_runtime_alive<T>(
+    runtime: RelayRuntime,
+    service: T,
+) -> Result<(RelayRuntime, T), Error> {
+    if runtime.completion_signal().is_triggered() {
+        let _ = shutdown_in_order(service, || runtime.shutdown()).await;
+        Err(Error::RuntimeStopped)
+    } else {
+        Ok((runtime, service))
     }
 }
 
@@ -205,7 +240,9 @@ mod tests {
     use deaddrop_relay_sqlite::{Error as StoreError, SqliteStore};
     use tempfile::TempDir;
 
-    use super::{launch_or_shutdown, shutdown_in_order};
+    use super::{
+        Error, LaunchFailure, ensure_runtime_alive, launch_or_shutdown, shutdown_in_order,
+    };
     use crate::runtime::RelayRuntime;
 
     struct DropRecorder(Arc<Mutex<Vec<&'static str>>>);
@@ -248,11 +285,52 @@ mod tests {
             .unwrap();
 
         let result = launch_or_shutdown(runtime, async { Err::<(), _>("launch-failed") }).await;
-        assert!(matches!(result, Err("launch-failed")));
+        assert!(matches!(
+            result,
+            Err(LaunchFailure::Launch("launch-failed"))
+        ));
         let store = captured.lock().unwrap().take().unwrap();
         assert!(matches!(
             store.compact(1_700_000_000).await,
             Err(StoreError::WorkerStopped)
         ));
+    }
+
+    #[tokio::test]
+    async fn runtime_completion_during_launch_cannot_report_readiness() {
+        let temp = TempDir::new().unwrap();
+        let runtime = RelayRuntime::start_panicking(temp.path().join("state/relay.sqlite3"))
+            .await
+            .unwrap();
+        let mut runtime_done = runtime.completion_signal();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let service = DropRecorder(Arc::clone(&events));
+
+        let result = launch_or_shutdown(runtime, async move {
+            runtime_done.cancelled().await;
+            Ok::<_, &'static str>(service)
+        })
+        .await;
+
+        assert!(matches!(result, Err(LaunchFailure::RuntimeStopped)));
+        drop(result);
+        assert_eq!(*events.lock().unwrap(), vec!["service-dropped"]);
+    }
+
+    #[tokio::test]
+    async fn completed_runtime_is_rejected_at_the_final_readiness_check() {
+        let temp = TempDir::new().unwrap();
+        let runtime = RelayRuntime::start_panicking(temp.path().join("state/relay.sqlite3"))
+            .await
+            .unwrap();
+        let mut runtime_done = runtime.completion_signal();
+        runtime_done.cancelled().await;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let service = DropRecorder(Arc::clone(&events));
+
+        let result = ensure_runtime_alive(runtime, service).await;
+
+        assert!(matches!(result, Err(Error::RuntimeStopped)));
+        assert_eq!(*events.lock().unwrap(), vec!["service-dropped"]);
     }
 }
