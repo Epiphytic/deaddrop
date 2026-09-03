@@ -1,0 +1,13 @@
+{
+  "name": "@epiphytic/deaddrop-workspace",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": { "node": ">=22.0.0" },
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "check:pins": "node scripts/validate-pins.mjs",
+    "test": "npm run test --workspaces --if-present",
+    "feasibility": "node scripts/run-feasibility.mjs --live",
+    "feasibility:offline": "node scripts/run-feasibility.mjs --offline"
+  }
+}

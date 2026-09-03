@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "mode": "live",
+  "complete": true,
+  "generated_at": "2026-09-01T22:44:19.638Z",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "rust": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "node": "22.22.2"
+  },
+  "pins": {
+    "mdk_upstream_repo": "https://github.com/marmot-protocol/mdk.git",
+    "mdk_upstream_base_rev": "876bdf3c408df0658c158da6a6521745cd0abde5",
+    "mdk_fork_repo": "https://github.com/Epiphytic/mdk.git",
+    "mdk_fork_rev": "4981e591bd9399fdad6d5bf62ce6eafa70da7d0b",
+    "openmls_repo": "https://github.com/erskingardner/openmls.git",
+    "openmls_rev": "59e7d3b27a7e95237879dd5478de1fd90eff7ada",
+    "tor_js_repo": "https://github.com/ethereum/tor-js.git",
+    "tor_js_gateway_rev": "dfa2096ec2067b063e873525f7ac6beaba5be966",
+    "tor_js_npm": "0.4.1",
+    "tor_js_fork_repo": "https://github.com/Epiphytic/tor-js.git",
+    "tor_js_fork_rev": "b84b996828a7b504072f9845c30e13650d78ce61",
+    "tor_js_package_url": "https://github.com/Epiphytic/tor-js/releases/download/deaddrop-onion-v0.4.1.1/tor-js-0.4.1.tgz",
+    "tor_js_package_sha256": "0318107fe8f3af841273a260f296e725a0bf6b58b31e6d9582d2b0953f3b4e34",
+    "tor_js_package_integrity": "sha512-JAr3NINxh44xGxLM5VF2ErKM6dnRI2pRYdLYkSlYFNmoKdiHvPMt0rUj+dVgsjHzpFEky4m7Ee4ExsNBFd2M9g==",
+    "tor_js_upstream_pr": "https://github.com/ethereum/tor-js/pull/15",
+    "hypertor": "0.3.0"
+  },
+  "checks": {
+    "mdk_native_current_profile": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "identity_proof_v2": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "key_package_30443": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "welcome_1059": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "group_event_445": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "chat_payload_9": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p marmot-wasm-probe",
+      "duration_ms": 30577,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-native.log"
+    },
+    "mdk_wasm_compiles": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "bash scripts/build-marmot-wasm.sh",
+      "duration_ms": 112032,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-wasm.log"
+    },
+    "wasm_state_round_trip": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "bash scripts/build-marmot-wasm.sh",
+      "duration_ms": 112032,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-wasm.log"
+    },
+    "native_wasm_interop": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "bash scripts/build-marmot-wasm.sh",
+      "duration_ms": 112032,
+      "log": "artifacts/feasibility/live-probe-logs/marmot-wasm.log"
+    },
+    "onion_unit": {
+      "status": "PASS",
+      "mandatory": false,
+      "command": "cargo test -p onion-probe --tests",
+      "duration_ms": 57930,
+      "log": "artifacts/feasibility/live-probe-logs/onion-unit.log"
+    },
+    "transport_unit": {
+      "status": "PASS",
+      "mandatory": false,
+      "command": "npm test -w packages/transport-probe",
+      "duration_ms": 571,
+      "log": "artifacts/feasibility/live-probe-logs/transport-unit.log"
+    },
+    "native_onion_service": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "cargo test -p onion-probe --tests && cargo test -p onion-probe --test live_persistence -- --nocapture",
+      "duration_ms": 87434,
+      "log": "artifacts/feasibility/live-probe-logs/onion-unit.log, artifacts/feasibility/live-probe-logs/native-onion-live.log"
+    },
+    "node_onion_fetch": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "npm test -w packages/transport-probe && node scripts/run-live-node-probe.mjs",
+      "duration_ms": 56046,
+      "log": "artifacts/feasibility/live-probe-logs/transport-unit.log, artifacts/feasibility/live-probe-logs/node-onion-live.log"
+    },
+    "browser_kps_onion_fetch": {
+      "status": "PASS",
+      "mandatory": true,
+      "command": "npm test -w packages/transport-probe && node scripts/run-live-browser-probe.mjs",
+      "duration_ms": 50912,
+      "log": "artifacts/feasibility/live-probe-logs/transport-unit.log, artifacts/feasibility/live-probe-logs/browser-kps-live.log"
+    },
+    "snowflake_transport": {
+      "status": "UNSUPPORTED",
+      "mandatory": false,
+      "reason": "tor-js 0.4.1 exposes browser relay access through KPS; no Snowflake option is present in the pinned public API"
+    }
+  },
+  "decision": "PASS",
+  "next_action": "write the native relay implementation plan"
+}

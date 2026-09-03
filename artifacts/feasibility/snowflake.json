@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "check": "snowflake_transport",
+  "status": "UNSUPPORTED",
+  "mandatory": false,
+  "reason": "tor-js 0.4.1 exposes browser relay access through KPS; no Snowflake option is present in the pinned public API"
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "check": "browser_kps_onion_fetch",
+  "generated_at": "2026-09-01T22:43:59.614Z",
+  "pins": {
+    "tor_js_gateway_rev": "dfa2096ec2067b063e873525f7ac6beaba5be966",
+    "tor_js_gateway_patch_sha256": "7baf04b31903624c41eb2d5850f55c0c76f3f25a913488648896cd0f82ba0b6d",
+    "tor_js_gateway_binary_sha256": "9d66101207979bae43041dfdd83e38a2334539135eaf94ae2e98190d17ee3b42",
+    "tor_js_fork_rev": "b84b996828a7b504072f9845c30e13650d78ce61"
+  },
+  "status": "PASS",
+  "transport": "tor-js-browser-kps",
+  "body": {
+    "service": "deaddrop-feasibility",
+    "status": "ok"
+  },
+  "durationMs": 10381
+}

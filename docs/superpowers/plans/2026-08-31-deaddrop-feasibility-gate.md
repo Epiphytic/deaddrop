@@ -376,7 +376,7 @@ Write `artifacts/feasibility/mdk-build.json` with this exact shape:
 
 For a failure, set `status` to `FAIL`, preserve sanitized compiler output, commit the artifact, and stop this plan. The design must then choose between maintaining an MDK fork/port or revisiting `marmot-ts`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/marmot-wasm-probe scripts/build-marmot-wasm.sh artifacts/feasibility/mdk-build.json Cargo.lock
@@ -605,9 +605,11 @@ Run: `cargo test -p marmot-wasm-probe --test native_flow -- --nocapture`
 
 Expected: PASS with all event-kind, author, identity-proof, and restart assertions.
 
-- [ ] **Step 5: Generate a deterministic native interop fixture**
+- [ ] **Step 5: Generate a checked-in native interop fixture from fixed scenario inputs**
 
-`generate_fixture.rs` runs the same fixed-key native flow and accepts exactly one output path argument. It atomically writes canonical JSON containing the public events, exported Bob state, expected group id, expected plaintext, upstream revisions, and a conspicuous `test_keys_only: true` marker. It must refuse paths outside `artifacts/feasibility/` and must never accept runtime/user keys.
+`generate_fixture.rs` runs the same fixed-key native flow and accepts exactly one output path argument. It atomically writes RFC 8785 canonical JSON containing the public events, exported Bob state, expected group id, expected plaintext, upstream revisions, and a conspicuous `test_keys_only: true` marker. It must refuse paths outside `artifacts/feasibility/` and must never accept runtime/user keys.
+
+OpenMLS and the Nostr wrappers draw fresh system entropy for KeyPackages, group construction, nonces, and ephemeral transport authors. The checked-in fixture is therefore the authoritative cross-runtime artifact; regenerating it intentionally produces different cryptographic bytes even though the scenario keys, timestamps, relay, `h`, and plaintext are fixed. Browser CI consumes the committed artifact and validates its revisions and protocol fields. Regeneration is an explicit fixture update, not a byte-for-byte reproducibility check.
 
 Run:
 
@@ -648,13 +650,15 @@ git commit -m "spike: prove marmot one-to-one flow in wasm"
 - Create: `crates/onion-probe/src/lib.rs`
 - Create: `crates/onion-probe/src/main.rs`
 - Create: `crates/onion-probe/tests/config.rs`
+- Create: `crates/onion-probe/tests/health.rs`
+- Create: `crates/onion-probe/tests/live_persistence.rs`
 - Modify: `Cargo.toml`
 
 **Interfaces:**
 - Consumes: a writable Tor state directory and virtual port 80.
 - Produces: `OnionProbeConfig::production(state_dir)`, a `/health` JSON route, and one serialized `StartupRecord { onion_url: String, state_dir: PathBuf }` line.
 
-- [ ] **Step 1: Write failing configuration tests**
+- [x] **Step 1: Write failing configuration tests**
 
 ```rust
 #[test]
@@ -671,13 +675,13 @@ fn state_directory_is_required() {
 }
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [x] **Step 2: Run and verify failure**
 
 Run: `cargo test -p onion-probe --test config`
 
 Expected: FAIL because the crate does not exist.
 
-- [ ] **Step 3: Implement the minimal onion application**
+- [x] **Step 3: Implement the minimal onion application**
 
 Add `"crates/onion-probe"` to the root Cargo workspace member list. Use:
 
@@ -707,7 +711,7 @@ let running = app.serve_on(onion).await?;
 
 Print the startup record to stdout and structured diagnostics to stderr. Never print onion private keys.
 
-- [ ] **Step 4: Verify unit tests and native build**
+- [x] **Step 4: Verify unit tests and native build**
 
 Run: `cargo test -p onion-probe`
 
@@ -717,11 +721,11 @@ Run: `cargo build --release -p onion-probe`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the live persistence probe**
+- [x] **Step 5: Run the live persistence probe**
 
 With `DEADDROP_LIVE_TOR=1`, start the service twice against the same temporary state directory, capture the first startup JSON line each time, and assert both onion URLs are identical. Inspect listening sockets and assert the process has no TCP listener; Arti's outbound sockets and onion rendezvous streams are allowed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/onion-probe Cargo.lock artifacts/feasibility
@@ -740,12 +744,14 @@ git commit -m "spike: host an http service with embedded arti"
 - Create: `packages/transport-probe/test/node-onion.test.ts`
 - Create: `scripts/run-live-node-probe.mjs`
 - Modify: `package-lock.json`
+- Modify: `upstream-pins.toml`
+- Modify: `scripts/validate-pins.mjs`
 
 **Interfaces:**
 - Consumes: `onion-probe` startup JSON and `tor-js@0.4.1` with no gateway option.
 - Produces: `fetchOnionFromNode(onionUrl: string): Promise<ProbeResult>`.
 
-- [ ] **Step 1: Write the failing live Node test**
+- [x] **Step 1: Write the failing live Node test**
 
 ```ts
 import { expect, test } from "vitest";
@@ -763,13 +769,13 @@ test.runIf(process.env.DEADDROP_LIVE_TOR === "1")(
 );
 ```
 
-- [ ] **Step 2: Run it and verify the implementation failure**
+- [x] **Step 2: Run it and verify the implementation failure**
 
 Run with a temporary fake URL: `DEADDROP_LIVE_TOR=1 DEADDROP_ONION_URL=http://example.onion npm test -w packages/transport-probe -- node-onion`
 
 Expected: FAIL because `fetchOnionFromNode` is absent.
 
-- [ ] **Step 3: Implement direct Node transport**
+- [x] **Step 3: Implement direct Node transport**
 
 Create `packages/transport-probe/package.json` with exact dependency versions:
 
@@ -783,7 +789,10 @@ Create `packages/transport-probe/package.json` with exact dependency versions:
     "test": "vitest run",
     "test:browser": "playwright test"
   },
-  "dependencies": { "tor-js": "0.4.1" },
+  "dependencies": {
+    "@kpstreams/core": "0.2.1",
+    "tor-js": "https://github.com/Epiphytic/tor-js/releases/download/deaddrop-onion-v0.4.1.1/tor-js-0.4.1.tgz"
+  },
   "devDependencies": {
     "@playwright/test": "1.62.1",
     "ajv": "8.20.0",
@@ -810,23 +819,28 @@ export interface ProbeResult {
 ```
 
 ```ts
-import { TorClient, storage } from "tor-js/wasm-file";
+import { ArtiSocketProvider, TorClient, storage } from "tor-js/wasm-file";
 
 export async function fetchOnionFromNode(onionUrl: string): Promise<ProbeResult> {
-  if (!/^http:\/\/[a-z2-7]{56}\.onion\/?$/.test(new URL(onionUrl).origin + "/")) {
-    throw new Error("onionUrl must be a v3 onion HTTP origin");
-  }
+  const origin = parseAndVerifyV3OnionOrigin(onionUrl);
   const started = performance.now();
-  const client = new TorClient({ storage: new storage.MemoryStorage() });
+  const client = new TorClient({
+    socketProvider: new ArtiSocketProvider({ strategies: ["direct"] }),
+    storage: new storage.MemoryStorage(),
+  });
   try {
-    const response = await client.fetch(new URL("/health", onionUrl).href, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+    const abort = new AbortController();
+    const body = await withTimeout(async () => {
+      const response = await client.fetch(new URL("/health", origin).href, {
+        signal: abort.signal,
+      });
+      if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+      return response.json();
+    }, 120_000, abort);
     return {
       status: "PASS",
       transport: "tor-js-node-direct",
-      body: await response.json(),
+      body,
       durationMs: Math.round(performance.now() - started),
     };
   } finally {
@@ -835,17 +849,19 @@ export async function fetchOnionFromNode(onionUrl: string): Promise<ProbeResult>
 }
 ```
 
-Do not set `gateway` or provide a clearnet fallback URL.
+Do not set `gateway` or provide a clearnet fallback URL. Validate the decoded v3 hostname version and checksum, not only its base32 shape. The 120-second deadline covers bootstrap, response headers, and body decoding; expiry aborts the request and closes the client.
 
-- [ ] **Step 4: Run the real live probe**
+The public `tor-js@0.4.1` artifact omitted Arti's `onion-service-client` feature and deterministically rejected `.onion` destinations. The feasibility implementation therefore pins the minimal Epiphytic fork commit and a release tarball with npm integrity in `upstream-pins.toml`. The fork changes only that Arti feature, its resulting lock graph, and documented WASM sizes; the patch is intended for upstreaming and retirement after an upstream release contains the fix.
+
+- [x] **Step 4: Run the real live probe**
 
 `scripts/run-live-node-probe.mjs` starts `onion-probe`, parses its JSON startup line, runs the Vitest case, terminates the child cleanly, and writes `artifacts/feasibility/node-onion.json`.
 
 Run: `DEADDROP_LIVE_TOR=1 node scripts/run-live-node-probe.mjs`
 
-Expected: PASS within 180 seconds and a result whose transport is `tor-js-node-direct`.
+Expected: the measured Node Arti bootstrap and HTTP exchange passes within its 120-second deadline and reports `tor-js-node-direct`; Vitest retains a 180-second test ceiling. The harness separately allows up to 300 seconds to build the native probe, 300 seconds for the native service to publish, and 210 seconds as an outer process-tree watchdog. Those setup/watchdog ceilings are not reported as the Node fetch duration.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/transport-probe scripts/run-live-node-probe.mjs package-lock.json artifacts/feasibility/node-onion.json
@@ -861,6 +877,7 @@ git commit -m "spike: fetch an onion service from node arti"
 - Create: `packages/transport-probe/src/browser.ts`
 - Create: `packages/transport-probe/test/browser-kps.spec.ts`
 - Create: `packages/transport-probe/web/index.html`
+- Create: `patches/tor-js-gateway-loopback.patch`
 - Create: `scripts/install-kps-gateway.sh`
 - Create: `scripts/run-live-browser-probe.mjs`
 - Modify: `packages/transport-probe/package.json`
@@ -870,7 +887,7 @@ git commit -m "spike: fetch an onion service from node arti"
 - Consumes: onion URL plus a KPS address in `ip:port:certhash` format.
 - Produces: `fetchOnionFromBrowser(onionUrl, gateway): Promise<ProbeResult>` and `artifacts/feasibility/browser-kps.json`.
 
-- [ ] **Step 1: Write the failing Playwright test**
+- [x] **Step 1: Write the failing Playwright test**
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -886,23 +903,25 @@ test("browser builds Tor locally and reaches the onion through KPS", async ({ pa
 });
 ```
 
-- [ ] **Step 2: Run it and verify failure**
+- [x] **Step 2: Run it and verify failure**
 
 Run: `npm run test:browser --workspace packages/transport-probe -- browser-kps.spec.ts`
 
 Expected: FAIL because the fixture and browser function do not exist.
 
-- [ ] **Step 3: Pin and install the gateway**
+- [x] **Step 3: Pin and install the gateway**
 
-`scripts/install-kps-gateway.sh` must verify the checked-out commit equals `dfa2096ec2067b063e873525f7ac6beaba5be966`, then run:
+`scripts/install-kps-gateway.sh` verifies the checked-out commit equals `dfa2096ec2067b063e873525f7ac6beaba5be966`, applies the reviewed one-line `patches/tor-js-gateway-loopback.patch`, and installs the patched crate from that verified checkout:
 
 ```bash
-cargo install --git https://github.com/ethereum/tor-js.git --rev dfa2096ec2067b063e873525f7ac6beaba5be966 --locked tor-js-gateway --root artifacts/tools/tor-js-gateway
+git apply --check patches/tor-js-gateway-loopback.patch
+git apply patches/tor-js-gateway-loopback.patch
+cargo install --path crates/tor-js-gateway --locked --root artifacts/tools/tor-js-gateway
 ```
 
-Generate gateway keys only under an ignored temporary directory. Parse the KPS address from startup output; never commit the gateway private key.
+The patch changes the KPS bind from wildcard UDP to `127.0.0.1` so the local proof never exposes an unauthenticated proxy to the LAN. The installer stamp records and verifies the source revision, patch SHA-256, and installed binary SHA-256; the live artifact records the latter two. Generate gateway keys only under an ignored temporary directory. Parse the KPS address from startup output; never commit the gateway private key.
 
-- [ ] **Step 4: Implement the self-contained browser fixture**
+- [x] **Step 4: Implement the self-contained browser fixture**
 
 Use `tor-js/wasm-base64` so the browser never fetches WASM from a CDN:
 
@@ -914,31 +933,37 @@ export async function fetchOnionFromBrowser(
   gateway: string,
 ): Promise<ProbeResult> {
   const started = performance.now();
+  const abort = new AbortController();
   const client = new TorClient({
     gateway,
-    storage: new storage.IndexedDBStorage("deaddrop-feasibility-tor"),
+    storage: storage.addLocking(
+      new storage.IndexedDBStorage("deaddrop-feasibility-tor"),
+      "deaddrop-feasibility-tor",
+    ),
   });
   try {
-    await client.ready();
-    const response = await client.fetch(new URL("/health", onionUrl).href, {
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok) throw new Error(`onion health returned ${response.status}`);
-    return {
-      status: "PASS",
-      transport: "tor-js-browser-kps",
-      body: await response.json(),
-      durationMs: Math.round(performance.now() - started),
-    };
+    return await withTimeout(async () => {
+      await client.ready();
+      const response = await client.fetch(new URL("/health", onionUrl).href, {
+        signal: abort.signal,
+      });
+      if (!response.ok) throw new Error(`onion health returned ${response.status}`);
+      return {
+        status: "PASS",
+        transport: "tor-js-browser-kps",
+        body: await response.json(),
+        durationMs: Math.round(performance.now() - started),
+      };
+    }, 120_000, abort);
   } finally {
     client.close();
   }
 }
 ```
 
-Bundle locally with esbuild. The page may contact only the configured KPS IP/UDP port as part of WebRTC and the local fixture origin. Add no analytics, fonts, STUN/TURN defaults, CDN imports, or alternate HTTP URL.
+Validate the Tor v3 hostname version and checksum before constructing the client. The 120-second deadline covers initialization, bootstrap, response headers, and body decoding. Bundle locally with esbuild. The page may contact only the configured KPS IP/UDP port as part of WebRTC and the local fixture origin. Add no analytics, fonts, STUN/TURN defaults, CDN imports, or alternate HTTP URL. A deterministic source-policy test holds the pinned browser bundle to `RTCPeerConnection({})` with no ICE server, STUN, or TURN configuration.
 
-- [ ] **Step 5: Run the orchestrated live browser probe**
+- [x] **Step 5: Run the orchestrated live browser probe**
 
 `scripts/run-live-browser-probe.mjs` starts `onion-probe`, the pinned KPS gateway, and a loopback static fixture server; passes the onion and gateway addresses to Playwright; collects browser console/network errors; and terminates every child in `finally`.
 
@@ -946,7 +971,7 @@ Run: `DEADDROP_LIVE_TOR=1 node scripts/run-live-browser-probe.mjs`
 
 Expected: PASS within 180 seconds and `artifacts/feasibility/browser-kps.json` with transport `tor-js-browser-kps`.
 
-- [ ] **Step 6: Record Snowflake capability separately**
+- [x] **Step 6: Record Snowflake capability separately**
 
 Inspect the pinned `tor-js` public API and write:
 
@@ -964,7 +989,7 @@ If the pinned revision actually exposes a tested Snowflake provider, replace `UN
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/transport-probe scripts/install-kps-gateway.sh scripts/run-live-browser-probe.mjs package-lock.json artifacts/feasibility
+git add packages/transport-probe patches/tor-js-gateway-loopback.patch scripts/install-kps-gateway.sh scripts/run-live-browser-probe.mjs package-lock.json artifacts/feasibility
 git commit -m "spike: fetch an onion service from browser arti over kps"
 ```
 
@@ -984,7 +1009,7 @@ git commit -m "spike: fetch an onion service from browser arti over kps"
 - Consumes: every per-probe JSON artifact.
 - Produces: schema-valid `results.json` and a one-page human recommendation with overall `PASS` or `FAIL`.
 
-- [ ] **Step 1: Write the failing aggregator test**
+- [x] **Step 1: Write the failing aggregator test**
 
 Create `scripts/run-feasibility.test.mjs`:
 
@@ -1004,13 +1029,13 @@ assert.equal(decide({ ...pass, mdk_wasm_compiles: { status: "FAIL" } }), "FAIL")
 assert.equal(decide({ ...pass, snowflake_transport: { status: "UNSUPPORTED" } }), "PASS");
 ```
 
-- [ ] **Step 2: Run it and verify failure**
+- [x] **Step 2: Run it and verify failure**
 
 Run: `node --test scripts/run-feasibility.test.mjs`
 
 Expected: FAIL because `decide` is absent.
 
-- [ ] **Step 3: Implement strict aggregation**
+- [x] **Step 3: Implement strict aggregation**
 
 Export `mandatoryChecks` exactly as listed at the top of this plan. `decide(records)` returns `PASS` only when every mandatory name exists and equals `PASS`; missing, `FAIL`, `ERROR`, or `UNSUPPORTED` mandatory checks return `FAIL`. Validate the final JSON against `schemas/feasibility-result.schema.json` with `ajv` before writing it atomically.
 
@@ -1032,19 +1057,19 @@ The writer supplies the actual UTC generation time, detected OS/architecture/Nod
 
 For `FAIL`, `next_action` names the failed design assumption and requests a design revision. The human Markdown report links the JSON, lists timings and WASM size, explains KPS versus optional Snowflake, and contains no secrets or full capability tags.
 
-- [ ] **Step 4: Add CI without pretending live Tor is deterministic**
+- [x] **Step 4: Add CI without pretending live Tor is deterministic**
 
 `.github/workflows/feasibility.yml` runs formatting, Clippy, Rust unit/native-flow tests, WASM compilation/browser unit tests, npm tests, and pin/schema validation on pushes and pull requests. Live onion/KPS probes run only under `workflow_dispatch` on a dedicated Linux runner with a 15-minute job timeout. CI uploads sanitized logs and JSON artifacts even on failure.
 
 `--offline` runs deterministic checks and writes `artifacts/feasibility/offline-results.json` without claiming an overall gate decision. `--live` runs every deterministic and network check and is the only mode allowed to write the final `results.json`.
 
-- [ ] **Step 5: Run the complete local gate**
+- [x] **Step 5: Run the complete local gate**
 
 Run: `npm run feasibility`
 
 Expected: all deterministic and live checks pass and `artifacts/feasibility/results.json` reports `PASS`. If any mandatory check fails, the command exits nonzero after writing the `FAIL` report. For a deterministic-only run, use `npm run feasibility:offline`; it must not write or preserve a stale final decision.
 
-- [ ] **Step 6: Verify repository quality**
+- [x] **Step 6: Verify repository quality**
 
 Run: `cargo fmt --all -- --check`
 
@@ -1066,7 +1091,7 @@ Run: `git diff --check`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit and push the gate result**
+- [x] **Step 7: Commit and push the gate result**
 
 ```bash
 git add schemas scripts .github/workflows/feasibility.yml artifacts/feasibility docs/feasibility README.md

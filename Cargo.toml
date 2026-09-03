@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/marmot-wasm-probe",
+    "crates/onion-probe",
+    "crates/protocol-core",
+    "crates/relay-core",
+    "crates/relay-sqlite",
+    "crates/server",
+]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.97"
+
+[workspace.dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+nostr = "=0.44.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "signal", "time"] }

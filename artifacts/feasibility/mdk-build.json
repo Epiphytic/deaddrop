@@ -1,0 +1,13 @@
+{
+  "check": "mdk_wasm_compiles",
+  "status": "PASS",
+  "command": "bash scripts/build-marmot-wasm.sh",
+  "mdk_upstream_base_rev": "876bdf3c408df0658c158da6a6521745cd0abde5",
+  "mdk_fork_rev": "4981e591bd9399fdad6d5bf62ce6eafa70da7d0b",
+  "target": "wasm32-unknown-unknown",
+  "compiler_path": "/opt/homebrew/opt/llvm/bin/clang",
+  "compiler_version": "Homebrew clang version 23.1.0",
+  "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "sanitized_stderr": "",
+  "acceptance": "Compile guard only; browser-runtime acceptance still requires the planned real browser engine, storage, signer, peeler, two-party, and restart tests."
+}

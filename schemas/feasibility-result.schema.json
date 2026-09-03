@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://epiphytic.github.io/deaddrop/schemas/feasibility-result.schema.json",
+  "title": "Deaddrop feasibility result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "complete",
+    "generated_at",
+    "platform",
+    "pins",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "mode": { "enum": ["offline", "live"] },
+    "complete": { "type": "boolean" },
+    "decision": { "enum": ["PASS", "FAIL"] },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "rust", "node"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "rust": { "type": "string", "minLength": 1 },
+        "node": { "type": "string", "minLength": 1 }
+      }
+    },
+    "pins": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["PASS", "FAIL", "ERROR", "UNSUPPORTED"] },
+          "mandatory": { "type": "boolean" },
+          "command": { "type": "string", "minLength": 1 },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "reason": { "type": "string", "minLength": 1 },
+          "log": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "next_action": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "live" } },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "decision": { "enum": ["PASS", "FAIL"] },
+          "next_action": { "type": "string", "minLength": 1 }
+        },
+        "required": ["decision", "next_action"]
+      },
+      "else": {
+        "properties": { "complete": { "const": false } },
+        "not": {
+          "anyOf": [
+            { "required": ["decision"] },
+            { "required": ["next_action"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": { "const": "live" },
+          "decision": { "const": "PASS" }
+        },
+        "required": ["mode", "decision"]
+      },
+      "then": {
+        "properties": {
+          "complete": { "const": true },
+          "checks": {
+            "type": "object",
+            "required": [
+              "mdk_native_current_profile",
+              "mdk_wasm_compiles",
+              "identity_proof_v2",
+              "key_package_30443",
+              "welcome_1059",
+              "group_event_445",
+              "chat_payload_9",
+              "wasm_state_round_trip",
+              "native_wasm_interop",
+              "node_onion_fetch",
+              "native_onion_service",
+              "browser_kps_onion_fetch"
+            ],
+            "properties": {
+              "mdk_native_current_profile": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "mdk_wasm_compiles": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "identity_proof_v2": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "key_package_30443": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "welcome_1059": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "group_event_445": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "chat_payload_9": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "wasm_state_round_trip": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "native_wasm_interop": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "node_onion_fetch": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "native_onion_service": { "$ref": "#/$defs/passingMandatoryCheck" },
+              "browser_kps_onion_fetch": { "$ref": "#/$defs/passingMandatoryCheck" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "passingMandatoryCheck": {
+      "type": "object",
+      "properties": {
+        "status": { "const": "PASS" },
+        "mandatory": { "const": true }
+      },
+      "required": ["status", "mandatory"]
+    }
+  }
+}
