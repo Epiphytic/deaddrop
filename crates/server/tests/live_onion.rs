@@ -38,9 +38,7 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
         return Ok(());
     }
 
-    let relay_root = tempfile::Builder::new()
-        .prefix("deaddrop-relay-live-")
-        .tempdir()
+    let relay_root = private_live_tempdir("deaddrop-relay-live-")
         .context("create private relay test directory")?;
     let client_root = tempfile::Builder::new()
         .prefix("deaddrop-client-live-")
@@ -105,7 +103,10 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
 
         let filter = inbox_filter(&recipient);
         let mut unauthorized =
-            authenticated_socket(&client, &startup.relay_url, &other_reader).await?;
+            after_onion_readiness(wait_for_http(&client, &startup.onion_url), || {
+                authenticated_socket(&client, &startup.relay_url, &other_reader)
+            })
+            .await?;
         send_text_bounded(
             &mut unauthorized,
             json!(["REQ", "unauthorized", filter.clone()]).to_string(),
@@ -163,6 +164,23 @@ async fn persistent_onion_serves_http_and_restores_private_authenticated_history
         "persistent identity proof was not retained"
     );
     Ok(())
+}
+
+fn private_live_tempdir(prefix: &str) -> Result<tempfile::TempDir> {
+    private_live_tempdir_in(&std::env::temp_dir(), prefix)
+}
+
+fn private_live_tempdir_in(temp_root: &std::path::Path, prefix: &str) -> Result<tempfile::TempDir> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let canonical_root = temp_root
+        .canonicalize()
+        .context("resolve private temporary directory")?;
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(canonical_root)
+        .context("create temporary directory beneath its canonical root")
 }
 
 fn keys(byte: u8) -> Keys {
@@ -243,6 +261,16 @@ async fn wait_for_http(client: &TorClient, onion_url: &str) -> Result<()> {
     let health = fetch_text(client, onion_url, "/health").await?;
     ensure!(health == "ok\n", "health response body was unexpected");
     Ok(())
+}
+
+async fn after_onion_readiness<T, R, C, F>(readiness: R, connect: C) -> Result<T>
+where
+    R: std::future::Future<Output = Result<()>>,
+    C: FnOnce() -> F,
+    F: std::future::Future<Output = Result<T>>,
+{
+    readiness.await?;
+    connect().await
 }
 
 async fn fetch_text(client: &TorClient, onion_url: &str, path: &str) -> Result<String> {
@@ -572,8 +600,8 @@ impl Drop for ManagedChild {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use std::future::pending;
+    use std::{collections::VecDeque, fs};
 
     use super::*;
 
@@ -603,6 +631,64 @@ mod tests {
                 SyntheticReceive::Stall => pending().await,
             }
         }
+    }
+
+    #[test]
+    fn live_fixture_resolves_a_macos_style_symlinked_temp_root() {
+        use std::os::unix::fs::symlink;
+
+        let safe_root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let sandbox = tempfile::Builder::new()
+            .prefix("deaddrop-live-path-test-")
+            .tempdir_in(safe_root)
+            .unwrap();
+        let private_var = sandbox.path().join("private/var");
+        let canonical_temp_root = private_var.join("folders");
+        fs::create_dir_all(&canonical_temp_root).unwrap();
+        symlink("private/var", sandbox.path().join("var")).unwrap();
+        let macos_temp_root = sandbox.path().join("var/folders");
+
+        let fixture = private_live_tempdir_in(&macos_temp_root, "deaddrop-relay-live-").unwrap();
+
+        assert!(fixture.path().starts_with(&canonical_temp_root));
+        let mut component_path = std::path::PathBuf::new();
+        for component in fixture.path().components() {
+            component_path.push(component.as_os_str());
+            assert!(
+                !fs::symlink_metadata(&component_path)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "fixture retained symlinked component {}",
+                component_path.display()
+            );
+        }
+        deaddrop_server::state::StateDirectory::acquire(fixture.path())
+            .expect("production state validation must accept the live fixture path");
+    }
+
+    #[tokio::test]
+    async fn restarted_websocket_connection_waits_for_http_readiness() {
+        let (release_readiness, readiness) = tokio::sync::oneshot::channel();
+        let connection_started = std::cell::Cell::new(false);
+        let started = &connection_started;
+        let mut connection = Box::pin(after_onion_readiness(
+            async move {
+                readiness.await.unwrap();
+                Ok(())
+            },
+            move || async move {
+                started.set(true);
+                Ok::<_, anyhow::Error>("connected")
+            },
+        ));
+
+        assert!(futures::poll!(&mut connection).is_pending());
+        assert!(!connection_started.get());
+
+        release_readiness.send(()).unwrap();
+        assert_eq!(connection.await.unwrap(), "connected");
+        assert!(connection_started.get());
     }
 
     #[tokio::test]

@@ -222,9 +222,9 @@ Keep the debug audit at exactly one explicit loopback listener. Assert that `Tcp
 
 Add a dev-only hypertor dependency with `client`/`ws` features; it must not enter the release graph. With `DEADDROP_LIVE_TOR=1`, start the real `deaddrop relay`, require the process to stay alive, and wait for its startup record with a fixed deadline. Inspect that exact PID before and during traffic: run `lsof -nP -a -p PID -iTCP -sTCP:LISTEN` and require no rows, then `lsof -nP -a -p PID -iUDP` and require no rows because UDP has no `LISTEN` state. Outbound Arti TCP connections are allowed. Through the dev-only embedded `hypertor::TorClient`, fetch `/`, `/app.js`, and `/health`; through dev-only `TorWebSocket`, perform AUTH, publish, and a positive authorized query. No SOCKS proxy is permitted.
 
-- [ ] **Step 3: Prove identity and data persistence across restart**
+- [x] **Step 3: Prove identity and data persistence across restart**
 
-Implemented in the gated real-Tor test; execution remains pending because `DEADDROP_LIVE_TOR=1` was not explicitly enabled in the verification environment.
+Proved with the explicitly enabled gated real-Tor test on 2026-09-02: the relay retained its onion/relay URLs across restart, served the embedded app over onion HTTP, restored the private event only to its authorized reader over an authenticated WebSocket, and shut down cleanly.
 
 Restart against the same private data directory and assert the onion/relay URLs are identical and the previously stored event remains available only to its authorized reader. Bound SIGINT shutdown and redact live evidence.
 
